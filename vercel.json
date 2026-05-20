@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/webhook/whatsapp", "destination": "/api/webhook/whatsapp" },
+    { "source": "/api/backoffice/companies/:id/users/:email", "destination": "/api/backoffice/companies/[id]/users/[email]?id=:id&email=:email" },
+    { "source": "/api/backoffice/companies/:id/projects/:projectId", "destination": "/api/backoffice/companies/[id]/projects/[projectId]?id=:id&projectId=:projectId" },
+    { "source": "/api/backoffice/companies/:id/users", "destination": "/api/backoffice/companies/[id]/users?id=:id" },
+    { "source": "/api/backoffice/companies/:id/projects", "destination": "/api/backoffice/companies/[id]/projects?id=:id" },
+    { "source": "/api/backoffice/companies/:id", "destination": "/api/backoffice/companies/[id]?id=:id" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

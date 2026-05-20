@@ -1,0 +1,14 @@
+-- No schema change needed: the 'source' column on field_logs has no check constraint,
+-- so 'whatsapp' is already a valid value alongside 'manual' and 'email'.
+--
+-- This file documents the expected source values for reference:
+--   'manual'   — created in the web app
+--   'email'    — received via Mailgun inbound-email edge function
+--   'whatsapp' — received via inbound-whatsapp edge function
+--
+-- Run this if you want to add a check constraint (optional — locks existing rows):
+-- alter table field_logs
+--   drop constraint if exists field_logs_source_check;
+-- alter table field_logs
+--   add constraint field_logs_source_check
+--   check (source in ('manual', 'email', 'whatsapp', 'voice'));

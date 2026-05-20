@@ -1,0 +1,327 @@
+/* Display sans (Inter) is loaded in index.html. Serif italic for editorial tag-lines. */
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@1,8..60,400;1,8..60,500;1,8..60,600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design tokens — light glassmorphism ─────────────────────────────────── */
+@layer base {
+  :root {
+    --background:          220 30% 97%;
+    --foreground:          222 25% 12%;
+
+    --card:                0 0% 99%;
+    --card-foreground:     222 25% 12%;
+
+    --popover:             0 0% 100%;
+    --popover-foreground:  222 25% 12%;
+
+    --primary:             244 100% 71%;  /* #7669ff */
+    --primary-foreground:  0 0% 100%;
+
+    --secondary:           220 18% 94%;
+    --secondary-foreground: 222 15% 35%;
+
+    --muted:               220 18% 94%;
+    --muted-foreground:    220 10% 52%;
+
+    --accent:              220 18% 94%;
+    --accent-foreground:   222 25% 12%;
+
+    --destructive:         0 78% 58%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border:              220 20% 90%;
+    --input:               220 20% 90%;
+    --ring:                244 100% 71%;
+
+    --radius:              0.875rem;
+
+    /* Semantic tokens */
+    --surface-1:      rgba(255,255,255,0.85);
+    --surface-2:      rgba(255,255,255,0.55);
+    --surface-3:      rgba(248,250,252,0.70);
+    --text-primary:   #111827;
+    --text-secondary: #4b5563;
+    --text-tertiary:  #9ca3af;
+    --border-color:   rgba(255,255,255,0.80);
+
+    --brand:          #7669ff;
+    --brand-dim:      rgba(118,105,255,0.12);
+    --brand-deep:     #280063;
+    --brand-mint:     #b2f9eb;
+    --brand-pink:     #ffabff;
+    --brand-ink:      #0c0040;
+    --paper:          #F5F2E8;
+  }
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'system-ui', sans-serif;
+    background: linear-gradient(135deg, #F5F2E8 0%, #F8F5EB 50%, #F2EEE0 100%);
+    min-height: 100vh;
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.10); border-radius: 100px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.18); }
+
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: opacity(0.35); cursor: pointer; }
+  select option { background: #fff; color: #111827; }
+}
+
+@layer components {
+  /* ── Type scale (pitch-deck aligned) ─────────────────────────────────────── */
+  /* Page-title display sans — restrained, editorial */
+  .display-hero {
+    font-family: 'Inter', sans-serif;
+    font-size: 32px; font-weight: 600;
+    letter-spacing: -0.025em; line-height: 1.15;
+    color: var(--brand-deep);
+  }
+  .display {
+    font-family: 'Inter', sans-serif;
+    font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
+    line-height: 1.25; color: var(--brand-deep);
+  }
+  .title-xl {
+    font-family: 'Inter', sans-serif;
+    font-size: 18px; font-weight: 600; letter-spacing: -0.015em;
+    line-height: 1.3; color: var(--brand-deep);
+  }
+  .title-lg {
+    font-family: 'Inter', sans-serif;
+    font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+    line-height: 1.35; color: var(--brand-deep);
+  }
+
+  /* Editorial italic-serif tag-line — softer, smaller, less saturated */
+  .tagline {
+    font-family: 'Source Serif 4', 'Georgia', serif;
+    font-style: italic; font-weight: 400;
+    color: #6b6492;
+    letter-spacing: 0;
+  }
+  .tagline-lg { font-size: 16px; line-height: 1.45; }
+  .tagline-md { font-size: 14px; line-height: 1.5; }
+  .tagline-sm { font-size: 13px; line-height: 1.5; }
+
+  /* Section eyebrow — small mono caps, restrained */
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #8b88f1;
+  }
+  .label-caps {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--text-tertiary);
+  }
+
+  /* Mint highlighter underline used in deck on key phrases */
+  .mint-underline {
+    background-image: linear-gradient(transparent 60%, #b2f9eb 60%, #b2f9eb 95%, transparent 95%);
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    padding: 0 0.05em;
+  }
+  .pink-square::after {
+    content: '';
+    display: inline-block;
+    width: 0.4em; height: 0.4em;
+    margin-left: 0.08em;
+    background: #ffabff;
+    vertical-align: 0.05em;
+  }
+
+  /* Paper card — the cream-on-paper card used throughout the deck */
+  .paper-card {
+    background: #fff;
+    border: 1px solid rgba(40,0,99,0.06);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(40,0,99,0.04), 0 8px 24px rgba(40,0,99,0.06);
+  }
+  .paper-card-tight {
+    background: #fff;
+    border: 1px solid rgba(40,0,99,0.06);
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(40,0,99,0.04);
+  }
+  /* Inverted indigo card (used on slides 4, 9, 16) */
+  .indigo-card {
+    background: linear-gradient(135deg, #2a0068 0%, #1d0049 100%);
+    color: #fff;
+    border-radius: 20px;
+    box-shadow: 0 8px 40px rgba(40,0,99,0.30);
+  }
+
+  /* ── Badges ──────────────────────────────────────────────────────────────── */
+  .badge-delay    { @apply bg-red-50 text-red-600 border border-red-100; }
+  .badge-safety   { @apply bg-orange-50 text-orange-600 border border-orange-100; }
+  .badge-progress { @apply bg-[#e8fbf5] text-[#0c7a5e] border border-[#b2f9eb]; }
+  .badge-material { @apply bg-blue-50 text-blue-600 border border-blue-100; }
+  .badge-rfi      { @apply bg-violet-50 text-violet-600 border border-violet-100; }
+  .badge-general  { @apply bg-slate-100 text-slate-500 border border-slate-200; }
+
+  /* ── Filter pills ────────────────────────────────────────────────────────── */
+  .filter-pill {
+    @apply text-xs font-semibold px-3 py-1.5 rounded-full transition-all duration-200 cursor-pointer select-none;
+  }
+  .filter-pill-active   { @apply bg-[var(--text-primary)] text-white shadow-sm; }
+  .filter-pill-inactive { @apply text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-white/60; }
+
+  /* ── iOS safe area ───────────────────────────────────────────────────────── */
+  .h-safe-bottom { height: env(safe-area-inset-bottom, 0px); }
+
+  /* ── Glass surfaces ──────────────────────────────────────────────────────── */
+
+  /* Sidebar / nav */
+  .glass {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: blur(24px) saturate(200%);
+    -webkit-backdrop-filter: blur(24px) saturate(200%);
+    border: 1px solid rgba(255,255,255,0.85);
+  }
+  .glass-light {
+    background: rgba(255,255,255,0.55);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    border: 1px solid rgba(255,255,255,0.75);
+  }
+
+  /* Cards — the core glass surface */
+  .glass-card {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: blur(32px) saturate(200%) brightness(1.01);
+    -webkit-backdrop-filter: blur(32px) saturate(200%) brightness(1.01);
+    border: 1px solid rgba(255,255,255,0.88);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.03),
+      0 2px 4px rgba(0,0,0,0.04),
+      0 8px 24px rgba(0,0,0,0.06),
+      0 24px 48px rgba(0,0,0,0.04),
+      inset 0 1px 0 rgba(255,255,255,0.95);
+  }
+
+  /* Modal / sheet */
+  .glass-modal {
+    background: rgba(255,255,255,0.86);
+    backdrop-filter: blur(48px) saturate(220%) brightness(1.02);
+    -webkit-backdrop-filter: blur(48px) saturate(220%) brightness(1.02);
+    border: 1px solid rgba(255,255,255,0.95);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.04),
+      0 16px 40px rgba(0,0,0,0.10),
+      0 48px 96px rgba(0,0,0,0.10),
+      inset 0 1px 0 rgba(255,255,255,1);
+  }
+
+  /* Subtle tinted form backgrounds */
+  .glass-surface {
+    background: rgba(255,255,255,0.50);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.80);
+  }
+}
+
+/* ── Animated mesh orbs ──────────────────────────────────────────────────── */
+.orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+  will-change: transform;
+}
+.orb-1 {
+  width: 700px; height: 700px;
+  background: radial-gradient(circle, rgba(118,105,255,0.18) 0%, transparent 65%);
+  top: -200px; right: -150px;
+  animation: orb-drift-1 22s ease-in-out infinite;
+}
+.orb-2 {
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(255,171,255,0.16) 0%, transparent 65%);
+  bottom: -200px; left: -120px;
+  animation: orb-drift-2 28s ease-in-out infinite;
+}
+.orb-3 {
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(178,249,235,0.18) 0%, transparent 65%);
+  top: 35%; left: 28%;
+  animation: orb-drift-3 20s ease-in-out infinite;
+}
+@keyframes orb-drift-1 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%      { transform: translate(-40px,30px) scale(1.06); }
+  66%      { transform: translate(30px,-40px) scale(0.94); }
+}
+@keyframes orb-drift-2 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  40%      { transform: translate(50px,-30px) scale(1.08); }
+  70%      { transform: translate(-30px,50px) scale(0.92); }
+}
+@keyframes orb-drift-3 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  50%      { transform: translate(30px,30px) scale(1.10); }
+}
+
+/* ── Skeleton ────────────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(0,0,0,0.04) 0px,
+    rgba(0,0,0,0.08) 40px,
+    rgba(0,0,0,0.04) 80px
+  );
+  background-size: 400px;
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+  border-radius: 8px;
+}
+@keyframes skeleton-sweep {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+/* ── Brand shadows ───────────────────────────────────────────────────────── */
+.shadow-brand-sm { box-shadow: 0 4px 20px rgba(40,0,99,0.30); }
+.shadow-brand    { box-shadow: 0 8px 32px rgba(40,0,99,0.32); }
+
+/* ── Report markdown ─────────────────────────────────────────────────────── */
+.report-content h2 {
+  font-size: 13px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--text-primary); margin: 1.5rem 0 0.5rem;
+  padding-bottom: 0.375rem; border-bottom: 1px solid rgba(0,0,0,0.07);
+}
+.report-content h2:first-child { margin-top: 0; }
+.report-content h3 { font-size: 12px; font-weight: 600; color: var(--text-primary); margin: 1rem 0 0.25rem; }
+.report-content p { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0.3rem 0; }
+.report-content ul { margin: 0.375rem 0 0.375rem 1.25rem; list-style: disc; }
+.report-content li { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0.2rem 0; }
+.report-content strong { color: var(--text-primary); font-weight: 600; }
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

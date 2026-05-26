@@ -294,28 +294,6 @@ export default function ProjectSettings({ open, onClose, project, onSave, onChan
                   <Input value={form.description} onChange={set('description')} placeholder="Korte projectomschrijving…" />
                 </div>
 
-                {/* Project Contacts */}
-                <div>
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Label>Projectcontacten</Label>
-                  </div>
-                  <div className="space-y-3">
-                    {[
-                      { role: 'Bouwheer',   nameKey: 'bouwheer_name',   emailKey: 'bouwheer_email'   },
-                      { role: 'Architect',  nameKey: 'architect_name',  emailKey: 'architect_email'  },
-                      { role: 'Calculator', nameKey: 'calculator_name', emailKey: 'calculator_email' },
-                    ].map(({ role, nameKey, emailKey }) => (
-                      <div key={role}>
-                        <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-1">{role}</p>
-                        <FieldRow>
-                          <Input value={form[nameKey]} onChange={set(nameKey)} placeholder="Naam" />
-                          <Input value={form[emailKey]} onChange={set(emailKey)} placeholder="email@example.com" type="email" />
-                        </FieldRow>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
                 {/* Team */}
                 <div>
                   <div className="flex items-center gap-1.5 mb-2">

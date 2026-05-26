@@ -21,11 +21,22 @@ export default async function handler(req, res) {
     .eq('id', projectId)
     .maybeSingle();
   if (!proj) return res.status(404).json({ success: false, error: 'Project not found' });
-  if (proj.owner_id !== userId) {
-    return res.status(403).json({ success: false, error: 'Only the project owner can edit members' });
-  }
+
+  // Owner OR any member can PATCH (e.g. set teammate's WhatsApp phone).
+  // Only the owner can DELETE — guardrail against accidental removals.
+  const { data: membership } = await supabaseAdmin
+    .from('project_members')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  const isOwner  = proj.owner_id === userId;
+  const isMember = !!membership;
 
   if (req.method === 'DELETE') {
+    if (!isOwner) {
+      return res.status(403).json({ success: false, error: 'Only the project owner can remove members' });
+    }
     const { error } = await supabaseAdmin
       .from('project_members')
       .delete()
@@ -36,6 +47,9 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
+    if (!isOwner && !isMember) {
+      return res.status(403).json({ success: false, error: 'You must be a project member to edit' });
+    }
     const { whatsapp_phone } = req.body || {};
     const { error } = await supabaseAdmin
       .from('project_members')

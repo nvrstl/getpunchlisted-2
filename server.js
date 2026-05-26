@@ -822,10 +822,15 @@ app.post('/api/projects/:projectId/members', requireUser, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ success: false, error: 'Email required' });
 
-  // Only project owner can add members
+  // Owner OR any existing member can add new members.
   const { data: proj } = await supabaseAdmin.from('projects').select('owner_id').eq('id', projectId).single();
   if (!proj) return res.status(404).json({ success: false, error: 'Project not found' });
-  if (proj.owner_id !== req.userId) return res.status(403).json({ success: false, error: 'Only the project owner can add members' });
+  const { data: callerMembership } = await supabaseAdmin
+    .from('project_members').select('id')
+    .eq('project_id', projectId).eq('user_id', req.userId).maybeSingle();
+  if (proj.owner_id !== req.userId && !callerMembership) {
+    return res.status(403).json({ success: false, error: 'You must be a project member to add others' });
+  }
 
   const cleanEmail = email.trim().toLowerCase();
 
@@ -866,7 +871,12 @@ app.patch('/api/projects/:projectId/members/:memberId', requireUser, async (req,
   const { whatsapp_phone } = req.body;
   const { data: proj } = await supabaseAdmin.from('projects').select('owner_id').eq('id', projectId).single();
   if (!proj) return res.status(404).json({ success: false, error: 'Project not found' });
-  if (proj.owner_id !== req.userId) return res.status(403).json({ success: false, error: 'Only the project owner can edit members' });
+  const { data: callerMembership } = await supabaseAdmin
+    .from('project_members').select('id')
+    .eq('project_id', projectId).eq('user_id', req.userId).maybeSingle();
+  if (proj.owner_id !== req.userId && !callerMembership) {
+    return res.status(403).json({ success: false, error: 'You must be a project member to edit' });
+  }
 
   const { error } = await supabaseAdmin.from('project_members')
     .update({ whatsapp_phone: whatsapp_phone?.trim() || null })

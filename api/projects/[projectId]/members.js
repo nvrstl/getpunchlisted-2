@@ -40,9 +40,15 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    // Only the owner can add members
-    if (proj.owner_id !== userId) {
-      return res.status(403).json({ success: false, error: 'Only the project owner can add members' });
+    // Owner OR any existing member of the project can add new members.
+    const { data: membership } = await supabaseAdmin
+      .from('project_members')
+      .select('id')
+      .eq('project_id', projectId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (proj.owner_id !== userId && !membership) {
+      return res.status(403).json({ success: false, error: 'You must be a project member to add others' });
     }
     const { email } = req.body || {};
     if (!email) return res.status(400).json({ success: false, error: 'Email required' });

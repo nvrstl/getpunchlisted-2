@@ -286,6 +286,12 @@ export default function App() {
   // ── Project update ─────────────────────────────────────────────────────────
   const updateProject = (updated) => setProject(updated);
 
+  // Pick a project AND drop the user on the per-project dashboard. Needed
+  // because 'landing' stays in viewComponents even when a project is set —
+  // without resetting view, clicking a project from the overview would just
+  // re-render LandingDashboard with the new project loaded but never visible.
+  const selectProject = (p) => { setProject(p); setView('dashboard'); };
+
   // ── Field Logs ─────────────────────────────────────────────────────────────
   const submitLog = async ({ rawNote, location, photo = null, logDate = null }) => {
     const { data: entry, error } = await supabase.from('field_logs').insert({
@@ -862,21 +868,21 @@ export default function App() {
   if (!project && showProjectCreate) {
     return (
       <ProjectSelect
-        onSelect={(p) => { setProject(p); setShowProjectCreate(false); }}
+        onSelect={(p) => { selectProject(p); setShowProjectCreate(false); }}
       />
     );
   }
 
   const viewComponents = !project ? {
     landing:     <LandingDashboard
-                   onSelect={setProject}
+                   onSelect={selectProject}
                    onCreateProject={() => setShowProjectCreate(true)}
                  />,
     settings:    <Settings />,
     admin:       <Admin />,
   } : {
     landing:     <LandingDashboard
-                   onSelect={setProject}
+                   onSelect={selectProject}
                    onCreateProject={() => setShowProjectCreate(true)}
                  />,
     dashboard:   <Vandaag
@@ -928,10 +934,10 @@ export default function App() {
         onNavigate={setView}
         project={project}
         projects={projects}
-        onSelectProject={setProject}
+        onSelectProject={selectProject}
         onCreateProject={() => setShowProjectCreate(true)}
         onOpenSettings={() => setView('settings')}
-        onChangeProject={() => setProject(null)}
+        onChangeProject={() => { setProject(null); setView('landing'); }}
         userEmail={user?.email}
         isPlatformAdmin={isPlatformAdmin}
         onNavigateBackoffice={() => navigate('backoffice')}

@@ -3,10 +3,26 @@
 
 import { supabaseAdmin, authenticate } from '../../_lib/auth.js';
 
+// Returns true if the caller is a member of the project. Matches by user_id
+// OR email — covers email-only invites that haven't been back-linked yet
+// (auth/sync-memberships does the backfill on login but legacy rows may
+// have NULL user_id until that runs against this endpoint).
+async function isMember(projectId, userId, userEmail) {
+  const orClauses = [`user_id.eq.${userId}`];
+  if (userEmail) orClauses.push(`email.eq.${userEmail.toLowerCase()}`);
+  const { data } = await supabaseAdmin
+    .from('project_members')
+    .select('id')
+    .eq('project_id', projectId)
+    .or(orClauses.join(','))
+    .maybeSingle();
+  return !!data;
+}
+
 export default async function handler(req, res) {
   const auth = await authenticate(req, res);
   if (!auth) return;
-  const { userId } = auth;
+  const { userId, userEmail } = auth;
 
   // Vercel passes dynamic segments via req.query (also via the rewrite in vercel.json).
   const projectId = req.query.projectId;
@@ -22,13 +38,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     // Project owner or any member can read the list
-    const { data: membership } = await supabaseAdmin
-      .from('project_members')
-      .select('id')
-      .eq('project_id', projectId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (proj.owner_id !== userId && !membership) {
+    if (proj.owner_id !== userId && !(await isMember(projectId, userId, userEmail))) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
     const { data, error } = await supabaseAdmin
@@ -41,13 +51,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     // Owner OR any existing member of the project can add new members.
-    const { data: membership } = await supabaseAdmin
-      .from('project_members')
-      .select('id')
-      .eq('project_id', projectId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (proj.owner_id !== userId && !membership) {
+    if (proj.owner_id !== userId && !(await isMember(projectId, userId, userEmail))) {
       return res.status(403).json({ success: false, error: 'You must be a project member to add others' });
     }
     const { email } = req.body || {};

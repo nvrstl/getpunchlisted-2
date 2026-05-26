@@ -7,7 +7,7 @@ import { supabaseAdmin, authenticate } from '../../../_lib/auth.js';
 export default async function handler(req, res) {
   const auth = await authenticate(req, res);
   if (!auth) return;
-  const { userId } = auth;
+  const { userId, userEmail } = auth;
 
   const projectId = req.query.projectId;
   const memberId  = req.query.memberId;
@@ -24,11 +24,15 @@ export default async function handler(req, res) {
 
   // Owner OR any member can PATCH (e.g. set teammate's WhatsApp phone).
   // Only the owner can DELETE — guardrail against accidental removals.
+  // Match membership by user_id OR email (covers email-only invites that
+  // haven't been back-linked yet).
+  const orClauses = [`user_id.eq.${userId}`];
+  if (userEmail) orClauses.push(`email.eq.${userEmail.toLowerCase()}`);
   const { data: membership } = await supabaseAdmin
     .from('project_members')
     .select('id')
     .eq('project_id', projectId)
-    .eq('user_id', userId)
+    .or(orClauses.join(','))
     .maybeSingle();
   const isOwner  = proj.owner_id === userId;
   const isMember = !!membership;

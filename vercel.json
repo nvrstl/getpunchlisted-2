@@ -11,6 +11,8 @@
     { "source": "/api/backoffice/companies/:id/users", "destination": "/api/backoffice/companies/[id]/users?id=:id" },
     { "source": "/api/backoffice/companies/:id/projects", "destination": "/api/backoffice/companies/[id]/projects?id=:id" },
     { "source": "/api/backoffice/companies/:id", "destination": "/api/backoffice/companies/[id]?id=:id" },
+    { "source": "/api/projects/:projectId/members/:memberId", "destination": "/api/projects/[projectId]/members/[memberId]?projectId=:projectId&memberId=:memberId" },
+    { "source": "/api/projects/:projectId/members", "destination": "/api/projects/[projectId]/members?projectId=:projectId" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

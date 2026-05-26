@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, FolderOpen, Settings as Cog, ShieldCheck, Building2, ChevronDown, Plus, Check, Inbox, History } from 'lucide-react';
+import { Mic, FolderOpen, Settings as Cog, ShieldCheck, Building2, ChevronDown, Plus, Check, Inbox, History, BarChart2 } from 'lucide-react';
 import { LogoMark } from './Logo';
 
 const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || '')
@@ -97,6 +97,15 @@ export default function Sidebar({
             title="Project-tijdlijn"
           >
             <History className="w-3.5 h-3.5" /> Geschiedenis
+          </button>
+          <button
+            onClick={() => onNavigate('report')}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium cursor-pointer transition-colors ${
+              currentView === 'report' ? 'bg-white text-[#0c0040] shadow-sm' : 'text-[var(--text-tertiary)] hover:text-[#0c0040]'
+            }`}
+            title="Dagrapport"
+          >
+            <BarChart2 className="w-3.5 h-3.5" /> Dagrapport
           </button>
         </div>
       )}

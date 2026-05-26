@@ -5,16 +5,32 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { ShimmerButton } from '../components/magicui/shimmer';
 import { AnimatedNumber } from '../components/magicui/animated-number';
+import WeatherCard from '../components/WeatherCard';
 
 const spring = { type: 'spring', stiffness: 300, damping: 28 };
 
-export default function DailyReport({ fieldLogs, rfis, punchItems, contextItems = [], project = null }) {
+export default function DailyReport({ fieldLogs, rfis, punchItems, contextItems = [], project = null, onLogWeatherDelay = null }) {
   const todayStr    = new Date().toISOString().split('T')[0];
   const [date, setDate]     = useState(todayStr);
   const [html, setHtml]     = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState('');
+  const [weather, setWeather] = useState(null);
   const iframeRef           = useRef(null);
+
+  // Fetch weather snapshot so we can include it in the report prompt.
+  // The WeatherCard renders the same data — but this lets us pass the real
+  // observation to the AI rather than letting it invent one.
+  useEffect(() => {
+    let cancelled = false;
+    setWeather(null);
+    if (!project?.id || !date) return;
+    fetch(`/api/weather?projectId=${project.id}&date=${date}`)
+      .then(r => r.json())
+      .then(json => { if (!cancelled && json.success) setWeather(json.data); })
+      .catch(() => { /* WeatherCard surfaces errors */ });
+    return () => { cancelled = true; };
+  }, [project?.id, date]);
 
   const selectedDate = new Date(date + 'T12:00:00').toDateString();
   const logsForDate  = fieldLogs.filter(l => {
@@ -64,6 +80,8 @@ export default function DailyReport({ fieldLogs, rfis, punchItems, contextItems 
           context:         contextItems,
           projectName:     project?.name     || '',
           projectLocation: project?.city     || '',
+          weather:         weather || null,
+          projectId:       project?.id       || null,
         }),
       });
       const json = await res.json();
@@ -105,6 +123,17 @@ export default function DailyReport({ fieldLogs, rfis, punchItems, contextItems 
           AI-gegenereerd werfrapport op basis van uw werfnotities en projectdata.
         </p>
       </motion.div>
+
+      {/* Weather snapshot + one-click delay log */}
+      {project?.id && (
+        <div className="mb-4">
+          <WeatherCard
+            projectId={project.id}
+            date={date}
+            onLogDelay={onLogWeatherDelay}
+          />
+        </div>
+      )}
 
       {/* Controls card */}
       <motion.div

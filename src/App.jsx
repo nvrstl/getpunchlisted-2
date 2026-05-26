@@ -11,6 +11,7 @@ import BottomNav from './components/BottomNav.jsx';
 import QuickLog from './components/QuickLog.jsx';
 import Vandaag from './views/Vandaag.jsx';
 import ProjectTimeline from './views/ProjectTimeline.jsx';
+import DailyReport from './views/DailyReport.jsx';
 import Settings from './views/Settings.jsx';
 import { Drawer, ContextPanel, ContactsPanel, ChatPanel, ProjectTopActions } from './components/ProjectDrawer.jsx';
 import Toast from './components/Toast.jsx';
@@ -899,6 +900,18 @@ export default function App() {
                    variations={variations}
                    disputes={disputes}
                    reminders={reminders}
+                 />,
+    report:      <DailyReport
+                   project={project}
+                   fieldLogs={fieldLogs}
+                   rfis={rfis}
+                   punchItems={punchItems}
+                   contextItems={contextItems}
+                   onLogWeatherDelay={async ({ rawNote, location, logDate }) => {
+                     // Reuses the normal field-log pipeline: AI processing will classify
+                     // this as a delay entry, which surfaces in disputes/variations flows.
+                     await submitLog({ rawNote, location, logDate });
+                   }}
                  />,
     settings:    <Settings onOpenProjectSettings={() => setShowSettings(true)} />,
     admin:       <Admin />,

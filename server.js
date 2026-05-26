@@ -29,6 +29,7 @@ import adminUsageHandler             from './api/admin-usage.js';
 import adminAccountsHandler          from './api/admin-accounts.js';
 import adminProjectsHandler          from './api/admin-projects.js';
 import adminProjectMembersHandler    from './api/admin-project-members.js';
+import buildWeatherHandler           from './api/weather.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -402,7 +403,7 @@ Rules:
 
 // ── Generate daily report ─────────────────────────────────────────────────────
 app.post('/api/generate-report', async (req, res) => {
-  const { date, logs, rfis, tasks, context, projectName, projectLocation } = req.body;
+  const { date, logs, rfis, tasks, context, projectName, projectLocation, weather } = req.body;
 
   try {
     // ── Build context sections for the prompt ──────────────────────────────
@@ -423,6 +424,16 @@ app.post('/api/generate-report', async (req, res) => {
     const contractItems = (context || []).filter(c => c.category === 'contract');
     const docItems      = (context || []).filter(c => c.category === 'document');
     const noteItems     = (context || []).filter(c => c.category === 'note');
+
+    const weatherSection = weather ? `
+WEATHER (observed for ${weather.log_date}):
+- Conditions: ${weather.conditions}
+- Temperature: ${weather.temp_min_c ?? '–'}°C to ${weather.temp_max_c ?? '–'}°C
+- Precipitation: ${weather.precip_mm ?? 0} mm
+- Wind: max ${weather.wind_max_kmh ?? '–'} km/h${weather.wind_gust_kmh ? `, gusts ${weather.wind_gust_kmh} km/h` : ''}
+- Delay risk classification: ${weather.delay_risk}
+Use these exact values for the "weather" field. If delay_risk is "medium" or "high", surface a brief weather-impact note in executiveSummary and add a relevant entry under issues when on-site work was plausibly affected.
+` : '';
 
     const contextSection = (context || []).length ? `
 DANGER FLAGS (must appear in safetyNotes and alertBoxes):
@@ -458,7 +469,7 @@ ${rfisSection}
 
 ACTION ITEMS / PUNCH LIST:
 ${tasksSection}
-${contextSection}${dangerItems.length ? `\nCRITICAL: ${dangerItems.length} danger flag(s) — must appear in alertBoxes AND safetyNotes.\n` : ''}
+${weatherSection}${contextSection}${dangerItems.length ? `\nCRITICAL: ${dangerItems.length} danger flag(s) — must appear in alertBoxes AND safetyNotes.\n` : ''}
 Output this JSON structure (fill every field from the data above):
 {"projectName":"...","projectLocation":"...","preparedBy":"...","weather":"...","nextMilestone":"...","handoverTarget":"...","executiveSummary":"2-3 sentence summary, may use HTML bold/italic","workCompleted":[{"title":"...","description":"...","status":"completed"}],"issues":[{"title":"...","description":"...","impactType":"cost","status":"pending"}],"openRfis":[{"number":"...","description":"...","status":"draft"}],"actionItems":{"inProgress":[{"action":"...","responsible":"..."}],"pendingHigh":[{"action":"...","responsible":"..."}],"pendingStandard":[{"action":"...","responsible":"..."}]},"alertBoxes":[],"safetyNotes":{"incidentsReported":false,"reminders":["..."]}}
 
@@ -1295,6 +1306,11 @@ app.post('/api/collect-evidence',        (req, res) => collectEvidenceHandler(re
 app.post('/api/generate-draft-response', (req, res) => generateDraftResponseHandler(req, res));
 app.post('/api/generate-dispute-dossier',(req, res) => generateDisputeDossierHandler(req, res));
 app.post('/api/send-dispute-response',  (req, res) => sendDisputeResponseHandler(req, res));
+
+// ── Weather snapshot (Open-Meteo, cached per project+date) ───────────────────
+const weatherHandler = buildWeatherHandler({ supabaseAdmin });
+app.get('/api/weather',  (req, res) => weatherHandler(req, res));
+app.post('/api/weather', (req, res) => weatherHandler(req, res));
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {

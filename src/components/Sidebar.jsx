@@ -43,11 +43,11 @@ export default function Sidebar({
         borderBottom: '1px solid rgba(40,0,99,0.06)',
       }}
     >
-      {/* Logo + wordmark */}
+      {/* Logo + wordmark — always goes back to the project overview */}
       <button
-        onClick={() => onNavigate('dashboard')}
+        onClick={() => { onChangeProject?.(); onNavigate('landing'); }}
         className="flex items-center gap-2 cursor-pointer"
-        title="Vandaag"
+        title="Naar overzicht"
       >
         <LogoMark size={22} withBackground={false} />
         <span className="text-[14px] font-semibold tracking-tight text-[#0c0040]">

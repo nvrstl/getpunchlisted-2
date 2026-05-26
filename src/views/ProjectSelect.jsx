@@ -59,6 +59,9 @@ export default function ProjectSelect({ onSelect }) {
     contractValue: '', description: '',
   };
   const [form, setForm] = useState(blank);
+  // company_id is auto-attached to any project the user creates so it shows
+  // up under their company in the Backoffice view. Looked up once on mount.
+  const [companyId, setCompanyId] = useState(null);
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
   const setStatus = (v) => setForm(f => ({ ...f, status: v }));
@@ -73,6 +76,16 @@ export default function ProjectSelect({ onSelect }) {
         setLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('company_users')
+      .select('company_id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => { if (data?.company_id) setCompanyId(data.company_id); });
+  }, [user?.id]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -94,6 +107,7 @@ export default function ProjectSelect({ onSelect }) {
         planned_completion: form.plannedCompletion || null,
         actual_completion:  form.actualCompletion || null,
         contract_value:     form.contractValue ? parseFloat(form.contractValue) : null,
+        company_id:         companyId,
       })
       .select()
       .single();

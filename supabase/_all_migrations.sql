@@ -1,6 +1,6 @@
 -- ============================================================
 -- Punchlister — consolidated migrations
--- Generated: 2026-05-25 18:02:18 UTC
+-- Generated: 2026-05-26 08:13:43 UTC
 -- Paste into Supabase SQL editor on a FRESH project.
 -- ============================================================
 
@@ -784,6 +784,21 @@ alter table public.wa_sender_state
 
 alter table disputes
   add column if not exists archived_at timestamptz;
+
+
+-- ────────── supabase/add_company_user_self_read.sql ──────────
+-- ── Let a user read their own company membership ─────────────────────────────
+-- company_users was originally locked to service-role only. Project creation
+-- needs the frontend to know which company the creator belongs to so it can
+-- stamp company_id on the new project row. Reading your own membership row
+-- isn't sensitive; reading other users' memberships still requires the
+-- backend / service-role key.
+
+drop policy if exists "users can read own company membership" on company_users;
+create policy "users can read own company membership"
+  on company_users
+  for select
+  using (user_id = auth.uid());
 
 
 -- ────────── supabase/add_contacts.sql ──────────

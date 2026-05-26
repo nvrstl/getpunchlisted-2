@@ -2,6 +2,35 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Parse JSON the model returned, with a fallback for the common failure
+// modes: stray prose around the object, unescaped quotes inside string
+// values, trailing commas. Throws a descriptive error (including a preview
+// of the raw text) when all attempts fail — the caller surfaces this to
+// the UI instead of a cryptic "Expected ',' or '}'".
+function parseLooseJson(raw) {
+  try { return JSON.parse(raw); } catch { /* fall through */ }
+
+  // Pull out the outermost {...} block in case the model added prose.
+  const match = raw.match(/\{[\s\S]*\}/);
+  const candidate = match ? match[0] : raw;
+
+  // Remove trailing commas before } or ]
+  const stripped = candidate.replace(/,(\s*[}\]])/g, '$1');
+  try { return JSON.parse(stripped); } catch { /* fall through */ }
+
+  // Last resort: try escaping bare double-quotes that appear inside what
+  // looks like a string value. This catches the most common Claude failure
+  // (an unescaped quote inside body/subject text).
+  const escaped = stripped.replace(
+    /("(?:subject|body|description|reasoning|rationale)"\s*:\s*")((?:[^"\\]|\\.)*?)("(?=\s*[,}]))/g,
+    (_m, head, inner, tail) => head + inner.replace(/(?<!\\)"/g, '\\"') + tail,
+  );
+  try { return JSON.parse(escaped); } catch (err) {
+    const preview = raw.slice(0, 200).replace(/\s+/g, ' ');
+    throw new Error(`Model returned invalid JSON (${err.message}). Raw preview: ${preview}…`);
+  }
+}
+
 export async function processNote(note, location = '', { contacts = [], contextItems = [], projectName = '' } = {}) {
   const contactsBlock = contacts.length
     ? contacts.map(c => `· ${c.name}${c.role ? ` (${c.role})` : ''}${c.email ? ` — ${c.email}` : ''}`).join('\n')
@@ -106,7 +135,7 @@ Wees beknopt. Wees in het Nederlands. Bij echte twijfel over recipientRole: laat
   });
 
   const raw = response.content[0].text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  const parsed = JSON.parse(raw);
+  const parsed = parseLooseJson(raw);
   if (!Array.isArray(parsed.disputeTypes))       parsed.disputeTypes       = [];
   if (!Array.isArray(parsed.workpoints))         parsed.workpoints         = [];
   if (!Array.isArray(parsed.recommendedOutputs)) parsed.recommendedOutputs = [];

@@ -29,7 +29,7 @@ import adminUsageHandler             from './api/admin-usage.js';
 import adminAccountsHandler          from './api/admin-accounts.js';
 import adminProjectsHandler          from './api/admin-projects.js';
 import adminProjectMembersHandler    from './api/admin-project-members.js';
-import buildWeatherHandler           from './api/weather.js';
+import weatherHandler                from './api/weather.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1308,7 +1308,8 @@ app.post('/api/generate-dispute-dossier',(req, res) => generateDisputeDossierHan
 app.post('/api/send-dispute-response',  (req, res) => sendDisputeResponseHandler(req, res));
 
 // ── Weather snapshot (Open-Meteo, cached per project+date) ───────────────────
-const weatherHandler = buildWeatherHandler({ supabaseAdmin });
+// Handler creates its own Supabase client from env vars so it works as both
+// an Express route AND a Vercel serverless function.
 app.get('/api/weather',  (req, res) => weatherHandler(req, res));
 app.post('/api/weather', (req, res) => weatherHandler(req, res));
 

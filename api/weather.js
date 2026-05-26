@@ -3,6 +3,13 @@
 // On first call for a project with no lat/lon, geocodes its `city` field and writes
 // the coordinates back to the projects table so subsequent calls skip geocoding.
 
+import { createClient } from '@supabase/supabase-js';
+
+// Module-scoped client — created once per warm Vercel function instance.
+const supabaseAdmin = (process.env.VITE_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+  ? createClient(process.env.VITE_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  : null;
+
 const WMO = {
   0:  { label: 'Clear',                  risk: 'none'   },
   1:  { label: 'Mainly clear',           risk: 'none'   },
@@ -65,14 +72,18 @@ async function fetchOpenMeteoDaily(lat, lon, date) {
   return await res.json();
 }
 
-function buildHandler({ supabaseAdmin }) {
-  return async function weatherHandler(req, res) {
-    const { projectId, date } = req.method === 'GET' ? req.query : req.body;
-    if (!projectId) return res.status(400).json({ success: false, error: 'projectId required' });
-    if (!date)      return res.status(400).json({ success: false, error: 'date (YYYY-MM-DD) required' });
-    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Server not configured' });
+export default async function handler(req, res) {
+  const { projectId, date } = req.method === 'GET' ? req.query : (req.body || {});
+  if (!projectId) return res.status(400).json({ success: false, error: 'projectId required' });
+  if (!date)      return res.status(400).json({ success: false, error: 'date (YYYY-MM-DD) required' });
+  if (!supabaseAdmin) {
+    return res.status(503).json({
+      success: false,
+      error: 'Server missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.',
+    });
+  }
 
-    try {
+  try {
       // 1) Cache hit? (weather_logs may not exist yet if migration not applied —
       //    treat any error here as a cache miss and continue.)
       const { data: existing, error: cacheErr } = await supabaseAdmin
@@ -161,12 +172,9 @@ function buildHandler({ supabaseAdmin }) {
         .single();
       if (insErr) throw new Error(insErr.message);
 
-      return res.json({ success: true, data: saved, cached: false });
-    } catch (err) {
-      console.error('weather error:', err.message);
-      return res.status(500).json({ success: false, error: err.message });
-    }
-  };
+    return res.json({ success: true, data: saved, cached: false });
+  } catch (err) {
+    console.error('weather error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
 }
-
-export default buildHandler;

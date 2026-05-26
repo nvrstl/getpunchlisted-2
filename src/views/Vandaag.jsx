@@ -141,6 +141,56 @@ const fmtShortDate = (iso) => iso
   ? new Date(iso).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })
   : '';
 
+// Render plain text with light formatting preserved: blank lines split
+// paragraphs, lines starting with `- ` or `• ` become bullets, and **bold**
+// markers render as <strong>. Designed for email/voice transcripts that
+// arrive as one wall of text with original whitespace intact.
+function renderInlineMarkup(text) {
+  // Split on **bold** while keeping the delimiters out of the result
+  const parts = text.split(/\*\*(.+?)\*\*/g);
+  return parts.map((chunk, i) =>
+    i % 2 === 1
+      ? <strong key={i} className="font-semibold not-italic">{chunk}</strong>
+      : <React.Fragment key={i}>{chunk}</React.Fragment>
+  );
+}
+
+function FormattedTranscript({ text }) {
+  if (!text) return null;
+  // Normalise line endings, then split into paragraphs on blank lines
+  const normalised = text.replace(/\r\n/g, '\n').trim();
+  const paragraphs = normalised.split(/\n{2,}/);
+
+  return (
+    <>
+      {paragraphs.map((para, pi) => {
+        const lines = para.split('\n');
+        const isList = lines.every(l => /^\s*[-•]\s+/.test(l));
+        if (isList) {
+          return (
+            <ul key={pi} className="list-disc pl-5 space-y-1 my-2">
+              {lines.map((l, li) => (
+                <li key={li}>{renderInlineMarkup(l.replace(/^\s*[-•]\s+/, ''))}</li>
+              ))}
+            </ul>
+          );
+        }
+        // Mixed paragraph: preserve single line breaks within it
+        return (
+          <p key={pi} className={pi === 0 ? '' : 'mt-3'}>
+            {lines.map((l, li) => (
+              <React.Fragment key={li}>
+                {li > 0 && <br />}
+                {renderInlineMarkup(l)}
+              </React.Fragment>
+            ))}
+          </p>
+        );
+      })}
+    </>
+  );
+}
+
 // Resolve a recommended output's recipient → email by matching against project contacts.
 function resolveRecipientEmail(output, contacts = [], members = []) {
   if (!output) return '';
@@ -1190,10 +1240,13 @@ export default function Vandaag({
 
               {/* Transcript */}
               <div className="paper-card p-5">
-                <p className="text-[14px] leading-relaxed italic"
-                   style={{ fontFamily: 'Source Serif 4, Georgia, serif', color: '#3a345e' }}>
-                  "{(selected.rawNote || selected.processedSummary || '').slice(0, 600)}{(selected.rawNote || '').length > 600 ? '…' : ''}"
-                </p>
+                <div className="text-[14px] leading-relaxed italic"
+                     style={{ fontFamily: 'Source Serif 4, Georgia, serif', color: '#3a345e' }}>
+                  <FormattedTranscript
+                    text={(selected.rawNote || selected.processedSummary || '').slice(0, 1500)
+                      + ((selected.rawNote || '').length > 1500 ? '…' : '')}
+                  />
+                </div>
               </div>
 
               {/* Outputs header + reprocess */}

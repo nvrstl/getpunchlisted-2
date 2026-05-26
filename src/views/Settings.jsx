@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2, LogOut,
   Loader2, Settings as SettingsIcon, ExternalLink,
-  Shield, ChevronRight,
+  Shield, ChevronRight, Eye, EyeOff,
 } from 'lucide-react';
 import { LogoMark } from '../components/Logo';
 import { Button } from '../components/ui/button';
@@ -85,6 +85,14 @@ export default function Settings({ onOpenProjectSettings }) {
   const [savingName, setSavingName] = useState(false);
   const [nameSaved, setNameSaved]   = useState(false);
 
+  // Password set/change — used both by invited users (who land logged-in
+  // via magic link with no password) and existing users wanting to update.
+  const [password, setPassword]       = useState('');
+  const [showPw, setShowPw]           = useState(false);
+  const [savingPw, setSavingPw]       = useState(false);
+  const [pwSaved, setPwSaved]         = useState(false);
+  const [pwError, setPwError]         = useState('');
+
   useEffect(() => {
     setName(user?.user_metadata?.full_name ?? '');
   }, [user?.user_metadata?.full_name]);
@@ -108,6 +116,26 @@ export default function Settings({ onOpenProjectSettings }) {
       setNameSaved(true);
       setTimeout(() => setNameSaved(false), 2000);
     }
+  };
+
+  const handleSavePassword = async (e) => {
+    e?.preventDefault();
+    setPwError('');
+    setPwSaved(false);
+    if (password.length < 6) {
+      setPwError('Wachtwoord moet minstens 6 tekens bevatten.');
+      return;
+    }
+    setSavingPw(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setSavingPw(false);
+    if (error) {
+      setPwError(error.message);
+      return;
+    }
+    setPassword('');
+    setPwSaved(true);
+    setTimeout(() => setPwSaved(false), 3000);
   };
 
   return (
@@ -163,6 +191,51 @@ export default function Settings({ onOpenProjectSettings }) {
             </div>
             <p className="text-[11px] text-[var(--text-tertiary)] mt-1.5">Wordt gebruikt voor de begroeting op je dashboard.</p>
           </div>
+
+          {/* Password set/change */}
+          <form onSubmit={handleSavePassword} className="px-5 py-4 border-t border-[var(--border-color)]">
+            <label className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider block mb-1.5">
+              Wachtwoord
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type={showPw ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setPwError(''); setPwSaved(false); }}
+                  placeholder="Nieuw wachtwoord (min. 6 tekens)"
+                  className="text-[13px] pr-9"
+                  disabled={savingPw}
+                  minLength={6}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw(v => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] cursor-pointer p-1"
+                  tabIndex={-1}
+                  aria-label={showPw ? 'Wachtwoord verbergen' : 'Wachtwoord tonen'}
+                >
+                  {showPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <Button type="submit" size="sm" disabled={savingPw || password.length < 6}>
+                {savingPw
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : pwSaved
+                    ? <><CheckCircle2 className="w-3.5 h-3.5" /> Opgeslagen</>
+                    : 'Opslaan'}
+              </Button>
+            </div>
+            {pwError && (
+              <p className="text-[11px] text-red-600 mt-1.5">{pwError}</p>
+            )}
+            {!pwError && (
+              <p className="text-[11px] text-[var(--text-tertiary)] mt-1.5">
+                Stel een wachtwoord in om voortaan zonder magic link aan te melden.
+              </p>
+            )}
+          </form>
 
           <Row
             icon={LogOut}

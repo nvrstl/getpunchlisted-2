@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic, Send, Loader2, MessageCircle, Mail, PenLine,
   Check, Trash2, Archive, RotateCcw, RefreshCw, AlertTriangle, Bell, FileSignature, Briefcase,
-  Clock, Sparkles, Layers, X,
+  Clock, Sparkles, Layers, X, ArrowUpDown,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -933,6 +933,9 @@ export default function Vandaag({
 
   const [tab, setTab] = useState('inbox');
   const [filter, setFilter] = useState('all');
+  // Inbox sort mode. Default 'timestamp' = newest first; 'priority' uses
+  // memoPriority() with createdAt as tiebreaker.
+  const [sortBy, setSortBy] = useState('timestamp');
 
   // Snoozed memos = unsent + future snoozedUntil. Inbox excludes them; they get their own tab.
   const now = Date.now();
@@ -941,19 +944,22 @@ export default function Vandaag({
   const snoozed  = useMemo(() => decorated.filter(l => !l.treated &&  isSnoozed(l)).sort((a, b) => new Date(a.snoozedUntil) - new Date(b.snoozedUntil)), [decorated]);
   const done     = useMemo(() => decorated.filter(l =>  l.treated), [decorated]);
 
-  // Priority-sort + apply filter pill on inbox; due-soon for snoozed; chronological for done.
+  // Sort + apply filter pill on inbox; due-soon for snoozed; chronological for done.
   const visible = useMemo(() => {
     if (tab === 'done')     return done;
     if (tab === 'snoozed')  return snoozed;
     const pill = FILTER_PILLS.find(p => p.id === filter);
     const sorted = [...inbox].sort((a, b) => {
-      const pa = memoPriority(a), pb = memoPriority(b);
-      if (pa !== pb) return pa - pb;
+      if (sortBy === 'priority') {
+        const pa = memoPriority(a), pb = memoPriority(b);
+        if (pa !== pb) return pa - pb;
+      }
+      // Timestamp tiebreaker (and the default sort): newest first.
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
     if (!pill?.match) return sorted;
     return sorted.filter(m => pill.match(computeTags(m)));
-  }, [tab, inbox, done, snoozed, filter]);
+  }, [tab, inbox, done, snoozed, filter, sortBy]);
 
   // Pre-compute counts for filter pills
   const pillCounts = useMemo(() => {
@@ -1191,6 +1197,29 @@ export default function Vandaag({
                   </button>
                 );
               })}
+
+              {/* Sort toggle — pushed to the right */}
+              <div className="ml-auto inline-flex items-center gap-1">
+                <ArrowUpDown className="w-3 h-3 text-[var(--text-tertiary)]" />
+                <button
+                  onClick={() => setSortBy('timestamp')}
+                  title="Sorteer op tijdstip (nieuwste eerst)"
+                  className={cn('px-2 py-0.5 rounded-md text-[10.5px] font-medium cursor-pointer transition-colors',
+                                sortBy === 'timestamp'
+                                  ? 'bg-[#0c0040] text-white'
+                                  : 'text-[var(--text-tertiary)] hover:text-[#0c0040] hover:bg-black/[0.04]')}>
+                  Tijd
+                </button>
+                <button
+                  onClick={() => setSortBy('priority')}
+                  title="Sorteer op prioriteit"
+                  className={cn('px-2 py-0.5 rounded-md text-[10.5px] font-medium cursor-pointer transition-colors',
+                                sortBy === 'priority'
+                                  ? 'bg-[#0c0040] text-white'
+                                  : 'text-[var(--text-tertiary)] hover:text-[#0c0040] hover:bg-black/[0.04]')}>
+                  Prioriteit
+                </button>
+              </div>
             </div>
           )}
 

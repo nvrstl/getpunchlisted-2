@@ -925,6 +925,8 @@ export default function Vandaag({
   onDeleteLog,
   onReprocessLog,
   onUpdateLog,
+  openMemoId = null,
+  onMemoOpened,
 }) {
   const decorated = useMemo(() => fieldLogs.map((l) => {
     const text = l.processedSummary || l.rawNote || '';
@@ -992,6 +994,21 @@ export default function Vandaag({
     visible.find(l => l.id === selectedId) || visible[0] || null,
     [visible, selectedId]
   );
+
+  // Honour a chat-triggered "open this memo" request. Switch to the tab the
+  // memo lives in (inbox / snoozed / done), select it, then notify App to
+  // clear the request so re-renders don't reopen it forever.
+  useEffect(() => {
+    if (!openMemoId) return;
+    const log = decorated.find(l => l.id === openMemoId);
+    if (!log) { onMemoOpened?.(); return; }
+    if (log.treated) setTab('done');
+    else if (isSnoozed(log)) setTab('snoozed');
+    else setTab('inbox');
+    setSelectedId(openMemoId);
+    onMemoOpened?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openMemoId]);
 
   const [bulkBusy, setBulkBusy] = useState(false);
   const handleBulkTreat = async () => {

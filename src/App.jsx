@@ -135,6 +135,20 @@ export default function App() {
   const [viewParams, setViewParams]  = useState({});
   const [view, setView]             = useState('dashboard');
   const [showSettings, setShowSettings] = useState(false);
+  // When the chat dispatches 'punchlister:open-memo', we set this so Vandaag
+  // can react and open the right memo. Cleared after consumption.
+  const [memoToOpen, setMemoToOpen] = useState(null);
+
+  useEffect(() => {
+    const onOpenMemo = (e) => {
+      const id = e.detail?.id;
+      if (!id) return;
+      setView('dashboard');
+      setMemoToOpen(id);
+    };
+    window.addEventListener('punchlister:open-memo', onOpenMemo);
+    return () => window.removeEventListener('punchlister:open-memo', onOpenMemo);
+  }, []);
 
   // Check platform admin status once user loads
   useEffect(() => {
@@ -927,6 +941,8 @@ export default function App() {
                    onDeleteLog={deleteFieldLog}
                    onReprocessLog={reprocessLog}
                    onUpdateLog={updateFieldLog}
+                   openMemoId={memoToOpen}
+                   onMemoOpened={() => setMemoToOpen(null)}
                  />,
     timeline:    <ProjectTimeline
                    project={project}

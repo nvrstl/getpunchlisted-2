@@ -30,7 +30,7 @@ export default async function handler(req, res) {
       supabase.from('project_context').select('category, title, content, source').eq('project_id', projectId).order('created_at', { ascending: false }).limit(12),
       supabase.from('project_contacts').select('name, role, email, phone').eq('project_id', projectId),
       supabase.from('field_logs')
-        .select('processed_summary, raw_note, type, location, created_at, source, subject, treated')
+        .select('id, processed_summary, raw_note, type, location, created_at, source, subject, treated')
         .eq('project_id', projectId)
         .order('created_at', { ascending: false })
         .limit(200),
@@ -56,7 +56,8 @@ export default async function handler(req, res) {
       const subj = l.subject ? ` · "${l.subject}"` : '';
       const flag = l.treated ? '' : ' · ONBEHANDELD';
       const body = (l.processed_summary || l.raw_note || '').slice(0, 400);
-      return `── ${date}${src}${loc}${subj}${flag} ──\n${body}`;
+      // Prefix each item with its id so the model can cite it back.
+      return `[id:${l.id}] ── ${date}${src}${loc}${subj}${flag} ──\n${body}`;
     }).join('\n\n');
 
     const systemPrompt = `Je bent Punchlister, de admin-assistent van een Belgische bouwondernemer. Je beantwoordt vragen over één specifiek project. Antwoord beknopt, in het Nederlands, en altijd grond je antwoord in de project-data hieronder. Als iets niet in de data staat, zeg dat expliciet ("Dit staat niet in het projectgeheugen") in plaats van te gokken.
@@ -74,7 +75,10 @@ ${ctxBlock || '(geen documenten geüpload)'}
 INBOX — alle binnenkomende berichten (voice, e-mail, manuele log, WhatsApp; max 200 recent)
 ${logsBlock || '(nog geen inbox-items)'}
 
-Houd je antwoorden kort. Verwijs naar specifieke memo's of documenten als bewijs ("op 14 mei besproken", "in offerte v3 punt 2.4"). Geen markdown headers, gebruik korte alinea's.`;
+Houd je antwoorden kort. Verwijs naar specifieke memo's of documenten als bewijs.
+
+CITATIES — VERPLICHT:
+Wanneer je een specifiek inbox-item noemt (memo, e-mail, voicenote, WhatsApp), voeg dan ONMIDDELLIJK na de zin de marker [memo:<id>] toe, met het id uit de [id:...] prefix van dat item hierboven. Voorbeeld: "Op 14 mei meldde de bouwheer een vertraging.[memo:2d88d345-1de6-466e-88cd-51ef9257b81a]". Gebruik enkel echte id's die in het PROJECTGEHEUGEN voorkomen — verzin niets. Geen markdown headers, gebruik korte alinea's.`;
 
     const messages = [
       ...history.filter(m => m && m.role && m.content).map(m => ({

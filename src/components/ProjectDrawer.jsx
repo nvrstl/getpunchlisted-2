@@ -366,6 +366,35 @@ export function ContactsPanel({ contacts = [], onAdd, onUpdate, onDelete }) {
 /*  CHAT panel                                                                 */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
+// Render assistant text with [memo:<uuid>] markers turned into clickable
+// chips that fire a global event for App to handle (jump to inbox + open).
+function renderAssistantContent(text) {
+  if (!text) return null;
+  const re = /\[memo:([0-9a-f-]{36})\]/g;
+  const out = [];
+  let last = 0;
+  let m;
+  let idx = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const id = m[1];
+    out.push(
+      <button
+        key={`memo-${idx++}-${id}`}
+        type="button"
+        onClick={() => window.dispatchEvent(new CustomEvent('punchlister:open-memo', { detail: { id } }))}
+        className="inline-flex items-center align-baseline ml-0.5 px-1.5 py-0 rounded-md bg-[#ece9ff] text-[#3a31a8] text-[11px] font-semibold hover:bg-[#d8d2ff] cursor-pointer transition-colors"
+        title="Open dit inbox-item"
+      >
+        ↗ memo
+      </button>
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
 export function ChatPanel({ projectId, projectName }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
@@ -432,7 +461,9 @@ export function ChatPanel({ projectId, projectName }) {
                                m.role === 'user'
                                  ? 'bg-[#280063] text-white rounded-tr-sm'
                                  : 'bg-white border border-black/5 text-[#0c0040] rounded-tl-sm')}>
-              <p style={{ whiteSpace: 'pre-wrap' }}>{m.content}</p>
+              <p style={{ whiteSpace: 'pre-wrap' }}>
+                {m.role === 'assistant' ? renderAssistantContent(m.content) : m.content}
+              </p>
             </div>
           </div>
         ))}

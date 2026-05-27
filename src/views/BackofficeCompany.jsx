@@ -328,103 +328,6 @@ function CreateProjectModal({ companyId, companyUsers = [], onClose, onCreate })
   );
 }
 
-function LinkProjectModal({ companyId, onClose, onLink }) {
-  const [projects, setProjects] = useState([]);
-  const [selected, setSelected] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    apiFetch('/api/backoffice/unlinked-projects').then(res => {
-      if (res.success) setProjects(res.data);
-      setLoading(false);
-    });
-  }, []);
-
-  const handleLink = async () => {
-    if (!selected) { setError('Selecteer een project.'); return; }
-    setSaving(true);
-    try {
-      const res = await apiFetch(`/api/backoffice/companies/${companyId}/projects`, {
-        method: 'POST', body: { projectId: selected },
-      });
-      if (!res.success) throw new Error(res.error);
-      onLink(res.data);
-      onClose();
-    } catch (ex) {
-      setError(ex.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <motion.div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    >
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <motion.div
-        className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden"
-        initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }}
-        transition={spring}
-      >
-        <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--border-color)]/60">
-          <h3 className="text-[15px] font-bold text-[var(--text-primary)]">Project koppelen</h3>
-          <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--surface-2)] transition cursor-pointer">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          {error && (
-            <div className="flex items-start gap-2 bg-red-50 text-red-700 rounded-xl px-3 py-2.5 text-[12px]">
-              <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{error}
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-wide">Selecteer project</label>
-            {loading ? (
-              <div className="flex items-center gap-2 text-[12px] text-[var(--text-tertiary)] py-2">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Laden…
-              </div>
-            ) : projects.length === 0 ? (
-              <p className="text-[12px] text-[var(--text-tertiary)] py-2">Geen ontkoppelde projecten beschikbaar.</p>
-            ) : (
-              <div className="relative">
-                <select
-                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-color)] text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition appearance-none cursor-pointer"
-                  value={selected} onChange={e => setSelected(e.target.value)}
-                >
-                  <option value="">— Kies een project —</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}{p.city ? ` (${p.city})` : ''}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" />
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2.5 px-6 py-4 border-t border-[var(--border-color)]/60 bg-[var(--surface-2)]/50">
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] transition cursor-pointer">
-            Annuleren
-          </button>
-          <motion.button
-            onClick={handleLink} disabled={saving || !selected}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand text-white text-[13px] font-semibold shadow-sm hover:brightness-105 disabled:opacity-60 transition cursor-pointer"
-            whileTap={{ scale: 0.97 }}
-          >
-            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Koppelen
-          </motion.button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
 
 export default function BackofficeCompany({ companyId, onNavigate }) {
   const [data, setData] = useState(null);
@@ -437,7 +340,6 @@ export default function BackofficeCompany({ companyId, onNavigate }) {
   const [roleError, setRoleError] = useState('');
   const [pendingRoleEmail, setPendingRoleEmail] = useState(null);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [showLinkProject, setShowLinkProject] = useState(false);
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null); // { type: 'user'|'project', id, label }
   const [showDeleteCompany, setShowDeleteCompany] = useState(false);
@@ -501,12 +403,12 @@ export default function BackofficeCompany({ companyId, onNavigate }) {
     }
   };
 
-  const handleUnlinkProject = async (projectId) => {
+  const handleDeleteProject = async (projectId) => {
     try {
       const res = await apiFetch(`/api/backoffice/companies/${companyId}/projects/${projectId}`, { method: 'DELETE' });
       if (res.success) setData(d => ({ ...d, projects: d.projects.filter(p => p.id !== projectId) }));
     } catch (ex) {
-      console.error('Unlink project failed:', ex.message);
+      console.error('Delete project failed:', ex.message);
     } finally {
       setConfirmRemove(null);
     }
@@ -787,24 +689,14 @@ export default function BackofficeCompany({ companyId, onNavigate }) {
             <span className="text-[13px] font-bold text-[var(--text-primary)]">Projecten</span>
             <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--surface-2)] text-[10px] font-bold text-[var(--text-tertiary)]">{projects.length}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <motion.button
-              onClick={() => setShowLinkProject(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-2)] transition cursor-pointer"
-              whileTap={{ scale: 0.97 }}
-              title="Koppel een bestaand losstaand project aan dit bedrijf"
-            >
-              Project koppelen
-            </motion.button>
-            <motion.button
-              onClick={() => setShowCreateProject(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand text-white text-[12px] font-semibold hover:brightness-105 transition cursor-pointer"
-              whileTap={{ scale: 0.97 }}
-            >
-              <Plus className="w-3 h-3" />
-              Nieuw project
-            </motion.button>
-          </div>
+          <motion.button
+            onClick={() => setShowCreateProject(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand text-white text-[12px] font-semibold hover:brightness-105 transition cursor-pointer"
+            whileTap={{ scale: 0.97 }}
+          >
+            <Plus className="w-3 h-3" />
+            Nieuw project
+          </motion.button>
         </div>
 
         {projects.length === 0 ? (
@@ -868,13 +760,6 @@ export default function BackofficeCompany({ companyId, onNavigate }) {
             onAdd={u => setData(d => ({ ...d, users: [u, ...d.users] }))}
           />
         )}
-        {showLinkProject && (
-          <LinkProjectModal
-            companyId={companyId}
-            onClose={() => setShowLinkProject(false)}
-            onLink={p => setData(d => ({ ...d, projects: [{ ...p, logCount: 0 }, ...d.projects] }))}
-          />
-        )}
         {showCreateProject && (
           <CreateProjectModal
             companyId={companyId}
@@ -888,12 +773,12 @@ export default function BackofficeCompany({ companyId, onNavigate }) {
             message={
               confirmRemove.type === 'user'
                 ? `Gebruiker "${confirmRemove.label}" verwijderen uit dit bedrijf?`
-                : `Project "${confirmRemove.label}" ontkoppelen van dit bedrijf?`
+                : `Project "${confirmRemove.label}" definitief verwijderen? Alle bijhorende werfnotities, RFI's, taken en e-mails worden mee verwijderd.`
             }
             onConfirm={() =>
               confirmRemove.type === 'user'
                 ? handleRemoveUser(confirmRemove.id)
-                : handleUnlinkProject(confirmRemove.id)
+                : handleDeleteProject(confirmRemove.id)
             }
             onCancel={() => setConfirmRemove(null)}
           />

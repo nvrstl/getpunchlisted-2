@@ -1,6 +1,6 @@
 -- ============================================================
 -- Punchlister — consolidated migrations
--- Generated: 2026-05-27 07:28:42 UTC
+-- Generated: 2026-05-27 07:46:45 UTC
 -- Paste into Supabase SQL editor on a FRESH project.
 -- ============================================================
 
@@ -837,19 +837,17 @@ $$;
 revoke all on function user_can_access_project(uuid) from public;
 grant execute on function user_can_access_project(uuid) to authenticated;
 
--- ── projects: rewrite select policy to include company access ────────────────
+-- ── projects: rewrite select policy ──────────────────────────────────────────
+-- IMPORTANT: must use user_can_access_project() (SECURITY DEFINER) instead of
+-- inline subqueries. The existing project_members policy subqueries projects,
+-- so an inline subquery here creates a cycle that Postgres rejects with a
+-- 500 at query time. SECURITY DEFINER bypasses RLS inside the function, so
+-- the cycle is broken.
 
 drop policy if exists "project_select" on projects;
 create policy "project_select" on projects
   for select
-  using (
-    owner_id = auth.uid()
-    or id in (select project_id from project_members where user_id = auth.uid())
-    or (
-      company_id is not null
-      and company_id in (select company_id from company_users where user_id = auth.uid())
-    )
-  );
+  using (user_can_access_project(id));
 
 -- ── Auto-stamp company_id on insert + require it ─────────────────────────────
 

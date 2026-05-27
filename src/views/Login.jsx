@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, Eye, EyeOff, Zap } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Zap, Mail } from 'lucide-react';
 import { LogoMark } from '../components/Logo';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import { Input } from '../components/ui/input';
 import { ShimmerButton } from '../components/magicui/shimmer';
 import { BorderBeam } from '../components/magicui/border-beam';
@@ -24,6 +25,20 @@ export default function Login() {
     setLoading(true);
     setError('');
     setInfo('');
+
+    if (mode === 'reset') {
+      // Supabase emails a magic link that drops the user into a password-
+      // recovery session. After clicking it they land on the app authenticated
+      // and can set a new password from Settings → Account → Wachtwoord.
+      const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/`,
+      });
+      if (err) setError(err.message);
+      else setInfo('Als dit e-mailadres bekend is, ontvangt u zo een resetlink. Volg de link en stel daarna een nieuw wachtwoord in via Instellingen.');
+      setLoading(false);
+      return;
+    }
+
     const { error: err } = mode === 'login'
       ? await signIn(email, password)
       : await signUp(email, password);
@@ -41,6 +56,9 @@ export default function Login() {
     setError('');
     setInfo('');
   };
+
+  const goToReset = () => { setMode('reset'); setError(''); setInfo(''); };
+  const backToLogin = () => { setMode('login'); setError(''); setInfo(''); };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F5F2E8] via-[#F8F5EB] to-[#F2EEE0] flex items-center justify-center p-4 relative overflow-hidden">
@@ -100,10 +118,14 @@ export default function Login() {
                   className="mb-6"
                 >
                   <h1 className="title-lg">
-                    {mode === 'login' ? 'Welkom terug' : 'Account aanmaken'}
+                    {mode === 'login'  ? 'Welkom terug'
+                     : mode === 'reset' ? 'Wachtwoord vergeten?'
+                     : 'Account aanmaken'}
                   </h1>
                   <p className="text-[13px] text-[var(--text-secondary)] mt-1">
-                    {mode === 'login' ? 'Aanmelden bij uw werkruimte.' : 'Begin met het beheren van uw projecten.'}
+                    {mode === 'login'  ? 'Aanmelden bij uw werkruimte.'
+                     : mode === 'reset' ? 'Vul uw e-mailadres in. We sturen u een resetlink.'
+                     : 'Begin met het beheren van uw projecten.'}
                   </p>
                 </motion.div>
               </AnimatePresence>
@@ -126,36 +148,46 @@ export default function Login() {
                   />
                 </motion.div>
 
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ ...spring, delay: 0.25 }}
-                >
-                  <label htmlFor="password" className="label-caps mb-2 block">Wachtwoord</label>
-                  <div className="relative">
-                    <Input
-                      id="password"
-                      type={showPw ? 'text' : 'password'}
-                      className="pr-11"
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      required
-                      minLength={6}
-                      autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                    />
-                    <motion.button
-                      type="button"
-                      onClick={() => setShowPw(v => !v)}
-                      aria-label={showPw ? 'Wachtwoord verbergen' : 'Wachtwoord tonen'}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors cursor-pointer p-1"
-                      whileTap={{ scale: 0.85 }}
-                      transition={spring}
-                    >
-                      {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </motion.button>
-                  </div>
-                </motion.div>
+                {mode !== 'reset' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ ...spring, delay: 0.25 }}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <label htmlFor="password" className="label-caps">Wachtwoord</label>
+                      {mode === 'login' && (
+                        <button type="button" onClick={goToReset}
+                                className="text-[11px] text-brand font-semibold hover:underline cursor-pointer">
+                          Vergeten?
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <Input
+                        id="password"
+                        type={showPw ? 'text' : 'password'}
+                        className="pr-11"
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                      />
+                      <motion.button
+                        type="button"
+                        onClick={() => setShowPw(v => !v)}
+                        aria-label={showPw ? 'Wachtwoord verbergen' : 'Wachtwoord tonen'}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors cursor-pointer p-1"
+                        whileTap={{ scale: 0.85 }}
+                        transition={spring}
+                      >
+                        {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </motion.button>
+                    </div>
+                  </motion.div>
+                )}
 
                 <AnimatePresence>
                   {error && (
@@ -191,7 +223,11 @@ export default function Login() {
                 >
                   <ShimmerButton type="submit" disabled={loading} className="w-full py-3 mt-1">
                     {loading ? (
-                      <><Loader2 className="w-4 h-4 animate-spin" />{mode === 'login' ? 'Aanmelden…' : 'Aanmaken…'}</>
+                      <><Loader2 className="w-4 h-4 animate-spin" />
+                        {mode === 'login' ? 'Aanmelden…' : mode === 'reset' ? 'Versturen…' : 'Aanmaken…'}
+                      </>
+                    ) : mode === 'reset' ? (
+                      <><Mail className="w-4 h-4" /> Stuur resetlink</>
                     ) : (
                       <><Zap className="w-4 h-4" />{mode === 'login' ? 'Aanmelden' : 'Account aanmaken'}</>
                     )}
@@ -200,16 +236,33 @@ export default function Login() {
               </form>
 
               <p className="text-center text-[12px] text-[var(--text-tertiary)] mt-6">
-                {mode === 'login' ? 'Nog geen account?' : 'Al een account?'}{' '}
-                <motion.button
-                  type="button"
-                  onClick={switchMode}
-                  className="text-brand font-semibold hover:underline cursor-pointer"
-                  whileTap={{ scale: 0.95 }}
-                  transition={spring}
-                >
-                  {mode === 'login' ? 'Registreren' : 'Aanmelden'}
-                </motion.button>
+                {mode === 'reset' ? (
+                  <>
+                    Terug naar{' '}
+                    <motion.button
+                      type="button"
+                      onClick={backToLogin}
+                      className="text-brand font-semibold hover:underline cursor-pointer"
+                      whileTap={{ scale: 0.95 }}
+                      transition={spring}
+                    >
+                      aanmelden
+                    </motion.button>
+                  </>
+                ) : (
+                  <>
+                    {mode === 'login' ? 'Nog geen account?' : 'Al een account?'}{' '}
+                    <motion.button
+                      type="button"
+                      onClick={switchMode}
+                      className="text-brand font-semibold hover:underline cursor-pointer"
+                      whileTap={{ scale: 0.95 }}
+                      transition={spring}
+                    >
+                      {mode === 'login' ? 'Registreren' : 'Aanmelden'}
+                    </motion.button>
+                  </>
+                )}
               </p>
             </div>
           </BorderBeam>

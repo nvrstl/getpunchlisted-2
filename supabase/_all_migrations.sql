@@ -1,6 +1,6 @@
 -- ============================================================
 -- Punchlister — consolidated migrations
--- Generated: 2026-05-27 05:36:13 UTC
+-- Generated: 2026-05-27 07:28:42 UTC
 -- Paste into Supabase SQL editor on a FRESH project.
 -- ============================================================
 
@@ -938,9 +938,10 @@ begin
   end if;
 
   if to_regclass('public.weather_logs')    is not null then
-    execute 'drop policy if exists "weather_logs_member_read"  on weather_logs';
-    execute 'drop policy if exists "weather_logs_member_write" on weather_logs';
+    execute 'drop policy if exists "weather_logs_member_read"   on weather_logs';
+    execute 'drop policy if exists "weather_logs_member_write"  on weather_logs';
     execute 'drop policy if exists "weather_logs_member_update" on weather_logs';
+    execute 'drop policy if exists "weather_logs_all"           on weather_logs';
     execute 'create policy "weather_logs_all" on weather_logs
              for all using (user_can_access_project(project_id))';
   end if;

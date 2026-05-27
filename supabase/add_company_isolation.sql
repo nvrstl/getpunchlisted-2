@@ -149,9 +149,10 @@ begin
   end if;
 
   if to_regclass('public.weather_logs')    is not null then
-    execute 'drop policy if exists "weather_logs_member_read"  on weather_logs';
-    execute 'drop policy if exists "weather_logs_member_write" on weather_logs';
+    execute 'drop policy if exists "weather_logs_member_read"   on weather_logs';
+    execute 'drop policy if exists "weather_logs_member_write"  on weather_logs';
     execute 'drop policy if exists "weather_logs_member_update" on weather_logs';
+    execute 'drop policy if exists "weather_logs_all"           on weather_logs';
     execute 'create policy "weather_logs_all" on weather_logs
              for all using (user_can_access_project(project_id))';
   end if;

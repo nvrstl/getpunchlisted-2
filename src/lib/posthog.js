@@ -11,7 +11,12 @@
 import posthog from 'posthog-js';
 
 const KEY  = import.meta.env.VITE_POSTHOG_KEY;
-const HOST = import.meta.env.VITE_POSTHOG_HOST || 'https://eu.i.posthog.com';
+// Route all ingestion through our own /ingest path (Vercel rewrites it to
+// PostHog). This dodges adblock lists that target eu.i.posthog.com directly.
+// VITE_POSTHOG_HOST is still honored if you want to override (e.g. localhost
+// dev pointing straight at PostHog).
+const HOST    = import.meta.env.VITE_POSTHOG_HOST || '/ingest';
+const UI_HOST = import.meta.env.VITE_POSTHOG_UI_HOST || 'https://eu.posthog.com';
 
 let initialized = false;
 
@@ -19,6 +24,7 @@ export function initPostHog() {
   if (initialized || !KEY || typeof window === 'undefined') return;
   posthog.init(KEY, {
     api_host:                HOST,
+    ui_host:                 UI_HOST,
     // Auto-capture pageviews on history changes (SPA navigation)
     capture_pageview:        'history_change',
     capture_pageleave:       true,

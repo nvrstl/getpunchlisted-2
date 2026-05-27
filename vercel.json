@@ -6,6 +6,9 @@
   },
   "rewrites": [
     { "source": "/webhook/whatsapp", "destination": "/api/webhook/whatsapp" },
+    { "source": "/ingest/static/:path*", "destination": "https://eu-assets.i.posthog.com/static/:path*" },
+    { "source": "/ingest/:path*",        "destination": "https://eu.i.posthog.com/:path*" },
+    { "source": "/ingest",                "destination": "https://eu.i.posthog.com" },
     { "source": "/api/backoffice/companies/:id/users/:email", "destination": "/api/backoffice/companies/[id]/users/[email]?id=:id&email=:email" },
     { "source": "/api/backoffice/companies/:id/projects/:projectId", "destination": "/api/backoffice/companies/[id]/projects/[projectId]?id=:id&projectId=:projectId" },
     { "source": "/api/backoffice/companies/:id/users", "destination": "/api/backoffice/companies/[id]/users?id=:id" },

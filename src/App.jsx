@@ -153,13 +153,21 @@ export default function App() {
       .then(({ data }) => setProjects(data || []));
   }, [user?.id, project?.id]); // refetch after a new project is created
 
-  // Route based on platform admin status once check is done
+  // Route once based on platform admin status. Platform admins land on the
+  // Backoffice by default but can navigate freely afterwards (so they can
+  // also work in their own company's projects via the regular dashboard).
+  // Non-admins who somehow end up on a backoffice page get bounced off it.
   useEffect(() => {
     if (!platformAdminChecked) return;
     const onBackofficePage = view === 'backoffice' || view === 'backofficeCompany';
-    if (isPlatformAdmin && !onBackofficePage) setView('backoffice');
+    if (isPlatformAdmin && !onBackofficePage && view === 'dashboard') {
+      // 'dashboard' is the initial useState value — treat that as "fresh load".
+      // Once the user navigates anywhere else, leave them alone.
+      setView('backoffice');
+    }
     if (!isPlatformAdmin && onBackofficePage) setView('dashboard');
-  }, [platformAdminChecked, isPlatformAdmin, view]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platformAdminChecked, isPlatformAdmin]);
 
   const navigate = (viewId, params = {}) => {
     setView(viewId);

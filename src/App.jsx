@@ -873,17 +873,18 @@ export default function App() {
     );
   }
 
+  // Project creation is intentionally removed from the regular UI — only
+  // platform admins can create projects via the Backoffice. This guarantees
+  // every project is tied to a company (the backoffice flow requires it).
   const viewComponents = !project ? {
     landing:     <LandingDashboard
                    onSelect={selectProject}
-                   onCreateProject={() => setShowProjectCreate(true)}
                  />,
     settings:    <Settings />,
     admin:       <Admin />,
   } : {
     landing:     <LandingDashboard
                    onSelect={selectProject}
-                   onCreateProject={() => setShowProjectCreate(true)}
                  />,
     dashboard:   <Vandaag
                    project={project}
@@ -935,7 +936,6 @@ export default function App() {
         project={project}
         projects={projects}
         onSelectProject={selectProject}
-        onCreateProject={() => setShowProjectCreate(true)}
         onOpenSettings={() => setView('settings')}
         onChangeProject={() => { setProject(null); setView('landing'); }}
         userEmail={user?.email}

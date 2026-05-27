@@ -583,13 +583,15 @@ export default function LandingDashboard({ onSelect, onCreateProject }) {
             <span className="relative text-[13px] font-semibold text-[var(--text-primary)]">Dashboard</span>
           </div>
 
-          <button
-            onClick={onCreateProject}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-1)] transition-colors cursor-pointer"
-          >
-            <FolderOpen className="w-[15px] h-[15px] flex-shrink-0" />
-            <span className="text-[13px] font-medium">Projecten</span>
-          </button>
+          {onCreateProject && (
+            <button
+              onClick={onCreateProject}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-1)] transition-colors cursor-pointer"
+            >
+              <FolderOpen className="w-[15px] h-[15px] flex-shrink-0" />
+              <span className="text-[13px] font-medium">Projecten</span>
+            </button>
+          )}
 
           <div className="h-px bg-[var(--border-color)]/60 mx-2 my-3" />
 
@@ -753,26 +755,32 @@ export default function LandingDashboard({ onSelect, onCreateProject }) {
                   {activeProjects.length} {activeProjects.length === 1 ? 'actief project' : 'actieve projecten'}
                 </h2>
               </div>
-              <button
-                onClick={onCreateProject}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium text-[var(--text-secondary)] hover:text-[#0c0040] hover:bg-black/[0.04] cursor-pointer"
-                title="Nieuw project"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Nieuw
-              </button>
+              {onCreateProject && (
+                <button
+                  onClick={onCreateProject}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium text-[var(--text-secondary)] hover:text-[#0c0040] hover:bg-black/[0.04] cursor-pointer"
+                  title="Nieuw project"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Nieuw
+                </button>
+              )}
             </div>
 
             {activeProjects.length === 0 ? (
               <div className="paper-card-tight px-5 py-8 text-center">
                 <p className="text-[13px] text-[var(--text-secondary)] mb-3">
-                  Nog geen projecten. Maak er een aan om te starten.
+                  {onCreateProject
+                    ? 'Nog geen projecten. Maak er een aan om te starten.'
+                    : 'Nog geen projecten toegewezen. Vraag een beheerder om je aan een project te koppelen.'}
                 </p>
-                <button onClick={onCreateProject}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium cursor-pointer"
-                        style={{ background: '#280063', color: '#fff' }}>
-                  <Plus className="w-4 h-4" /> Nieuw project
-                </button>
+                {onCreateProject && (
+                  <button onClick={onCreateProject}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium cursor-pointer"
+                          style={{ background: '#280063', color: '#fff' }}>
+                    <Plus className="w-4 h-4" /> Nieuw project
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

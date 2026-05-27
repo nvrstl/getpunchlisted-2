@@ -318,6 +318,7 @@ export default function App() {
         contacts: projectContacts.map(c => ({ name: c.name, role: c.role, email: c.email })),
         contextItems: contextItems.map(i => ({ category: i.category, title: i.title, content: i.content, source: i.source })),
         projectName: project.name,
+        senderName: (user?.user_metadata?.full_name || '').trim() || (user?.email || '').split('@')[0],
       }),
     })
       .then(r => r.json()).then(async json => {
@@ -412,6 +413,7 @@ export default function App() {
           contacts: projectContacts.map(c => ({ name: c.name, role: c.role, email: c.email })),
           contextItems: contextItems.map(i => ({ category: i.category, title: i.title, content: i.content, source: i.source })),
           projectName: project.name,
+          senderName: (user?.user_metadata?.full_name || '').trim() || (user?.email || '').split('@')[0],
         }),
       });
       const procJson = await procRes.json();
@@ -734,12 +736,32 @@ export default function App() {
   // ── Outbound emails ────────────────────────────────────────────────────────
   const sendEmail = async ({ to, cc, bcc, replyTo, subject, body, html, fieldLogId, rfiId, variationId, disputeId }) => {
     if (!project?.id) throw new Error('No project loaded');
+    // Append a Dutch sign-off + the sender's name. AI drafts often end with
+    // "Met vriendelijke groet," but no name; this fills it in. If the body
+    // already includes the user's name in the last 100 chars, skip to avoid
+    // doubling it up.
+    const senderName = (user?.user_metadata?.full_name || '').trim()
+      || (user?.email || '').split('@')[0];
+    const withSignature = (raw) => {
+      if (!raw) return raw;
+      const tail = raw.slice(-150);
+      if (senderName && tail.includes(senderName)) return raw;
+      // If text already has a sign-off line, append just the name underneath.
+      if (/met vriendelijke groet(en)?,?\s*$/im.test(raw.trimEnd())) {
+        return `${raw.trimEnd()}\n${senderName}`;
+      }
+      return `${raw.trimEnd()}\n\nMet vriendelijke groeten,\n${senderName}`;
+    };
+    const finalBody = withSignature(body);
+    const finalHtml = html ? withSignature(html).replace(/\n/g, '<br>') : html;
+
     const res = await fetch('/api/send-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         projectId: project.id, userId: user?.id || null,
-        to, cc, bcc, replyTo, subject, body, html,
+        to, cc, bcc, replyTo, subject,
+        body: finalBody, html: finalHtml,
         fieldLogId, rfiId, variationId, disputeId,
       }),
     });

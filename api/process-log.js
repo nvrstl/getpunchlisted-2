@@ -31,7 +31,7 @@ function parseLooseJson(raw) {
   }
 }
 
-export async function processNote(note, location = '', { contacts = [], contextItems = [], projectName = '' } = {}) {
+export async function processNote(note, location = '', { contacts = [], contextItems = [], projectName = '', senderName = '' } = {}) {
   const contactsBlock = contacts.length
     ? contacts.map(c => `· ${c.name}${c.role ? ` (${c.role})` : ''}${c.email ? ` — ${c.email}` : ''}`).join('\n')
     : '(geen contacten geregistreerd)';
@@ -92,7 +92,7 @@ Return exactly:
       "recipientRole":  null | "Klant|Architect|Schilder|Loodgieter|Elektricien|Bouwheer|Onderaannemer|Leverancier|Andere",
       "recipientName":  null | "exacte naam uit CONTACTEN als match",
       "subject":        "korte concrete subject NL",
-      "body":           "volledig opgesteld bericht NL, klaar te versturen, ondertekening op de slotregel weglaten",
+      "body":           "volledig opgesteld bericht NL, klaar te versturen, sluit af met op een eigen regel 'Met vriendelijke groeten,' en daaronder de naam '${senderName || '<jouw naam>'}'",
       "tone":           "chasing|courtesy|formal|briefing|self",
       "urgency":        "urgent|normal|low",
       "dueAt":          null | "YYYY-MM-DD (alleen voor self_reminder of reminder)",
@@ -179,10 +179,10 @@ Wees beknopt. Wees in het Nederlands. Bij echte twijfel over recipientRole: laat
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-  const { note, location, contacts, contextItems, projectName } = req.body;
+  const { note, location, contacts, contextItems, projectName, senderName } = req.body;
   if (!note) return res.status(400).json({ success: false, error: 'Note is required' });
   try {
-    const data = await processNote(note, location, { contacts, contextItems, projectName });
+    const data = await processNote(note, location, { contacts, contextItems, projectName, senderName });
     res.json({ success: true, data });
   } catch (error) {
     console.error('[process-log]', error);

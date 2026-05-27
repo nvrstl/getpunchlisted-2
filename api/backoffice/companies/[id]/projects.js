@@ -28,21 +28,34 @@ export default async function handler(req, res) {
       if (!ownerEmail?.trim()) {
         return res.status(400).json({ success: false, error: 'ownerEmail is verplicht' });
       }
+      const cleanEmail = ownerEmail.trim().toLowerCase();
 
-      // Owner must exist as an auth user. Resolve to id so RLS works.
-      const { data: ownerUser } = await supabaseAdmin
-        .schema('auth').from('users').select('id')
-        .eq('email', ownerEmail.trim().toLowerCase()).maybeSingle();
-      if (!ownerUser) {
+      // Owner must be a user of this company. company_users already has the
+      // resolved auth user_id (set by the invite-user flow), so look up there
+      // instead of querying auth.users (which needs special PostgREST grants).
+      const { data: companyUser } = await supabaseAdmin
+        .from('company_users')
+        .select('user_id, email')
+        .eq('company_id', id)
+        .eq('email', cleanEmail)
+        .maybeSingle();
+
+      if (!companyUser) {
         return res.status(400).json({
           success: false,
-          error: `No registered account with email ${ownerEmail}. They must sign up first.`,
+          error: `${ownerEmail} is geen gebruiker van dit bedrijf. Voeg hem/haar eerst toe.`,
+        });
+      }
+      if (!companyUser.user_id) {
+        return res.status(400).json({
+          success: false,
+          error: `${ownerEmail} heeft de uitnodiging nog niet aanvaard. Vraag hen om hun e-mail te checken en een wachtwoord in te stellen voor je een project op hun naam zet.`,
         });
       }
 
       const { data, error } = await supabaseAdmin.from('projects').insert({
         name:               name.trim(),
-        owner_id:           ownerUser.id,
+        owner_id:           companyUser.user_id,
         company_id:         id,                              // bound to this company
         status:             status || 'active',
         project_number:     projectNumber?.trim() || null,

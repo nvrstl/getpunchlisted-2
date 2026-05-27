@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { identifyUser, resetUser } from '../lib/posthog';
 
 const AuthContext = createContext(null);
 
@@ -24,7 +25,10 @@ export function AuthProvider({ children }) {
       clearTimeout(timeout);
       setUser(session?.user ?? null);
       setLoading(false);
-      if (session) syncMemberships(session);
+      if (session?.user) {
+        identifyUser(session.user);
+        syncMemberships(session);
+      }
     }).catch(() => {
       clearTimeout(timeout);
       setLoading(false);
@@ -32,7 +36,13 @@ export function AuthProvider({ children }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
-      if (event === 'SIGNED_IN' && session) syncMemberships(session);
+      if (event === 'SIGNED_IN' && session?.user) {
+        identifyUser(session.user);
+        syncMemberships(session);
+      }
+      if (event === 'SIGNED_OUT') {
+        resetUser();
+      }
     });
 
     return () => { clearTimeout(timeout); subscription.unsubscribe(); };

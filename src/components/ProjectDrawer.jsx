@@ -233,6 +233,10 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
         content:  composed.trim(),
         source:   file.name,
         raw_text: finalRawText,
+        // addContextItem fires this after every embedded batch (50 chunks/call)
+        // so the queue can show "Embedding 200/830" instead of a silent wait.
+        onEmbedProgress: ({ done, total }) =>
+          patchQueueItem(id, { status: 'embedding', chunksDone: done, chunksTotal: total }),
       });
       // addContextItem returns chunkCount and (optionally) embedError so we
       // can show whether the doc is searchable in the chat.
@@ -425,10 +429,11 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
               extracting: q.pagesTotal > 0 ? `Tekst lezen (${q.pagesDone}/${q.pagesTotal})` : 'Tekst lezen…',
               processing: 'AI samenvatting genereren…',
               saving:     'Opslaan…',
+              embedding:  q.chunksTotal > 0 ? `Doorzoekbaar maken (${q.chunksDone}/${q.chunksTotal} fragmenten)` : 'Doorzoekbaar maken…',
               done:       'Klaar',
               error:      'Mislukt',
             }[q.status] || q.status;
-            const isBusy   = q.status === 'extracting' || q.status === 'processing' || q.status === 'saving';
+            const isBusy   = q.status === 'extracting' || q.status === 'processing' || q.status === 'saving' || q.status === 'embedding';
             return (
               <div key={q.id} className="flex items-start gap-2">
                 <div className={cn(

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { chunkText } from './lib/chunking';
 import { useAuth } from './contexts/AuthContext';
 import Login from './views/Login';
 import SetPassword from './views/SetPassword';
@@ -620,28 +621,50 @@ export default function App() {
     if (error) throw new Error(error.message);
     setContextItems(prev => [mapContext(data), ...prev]);
 
-    // Synchronously chunk + embed. Returns chunk count + any error so the
-    // caller (upload UI) can display it. Failure here doesn't lose the
-    // document — the row is already saved — but it surfaces the problem
-    // instead of silently falling back to keyword-only retrieval.
+    // Chunk locally and stream batches of 50 to /api/embed-chunks. Each
+    // batch fits in a single OpenAI request (max 64) and a 30s Vercel
+    // function — so a 1 MB / 830-chunk PDF that previously blew the
+    // single-request timeout now completes in ~17 short calls.
+    const rawForChunks = item.raw_text || item.content || '';
+    const chunks = chunkText(rawForChunks);
+    if (chunks.length === 0) {
+      return { ...mapContext(data), chunkCount: 0 };
+    }
+    const BATCH_SIZE = 50;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return { ...mapContext(data), chunkCount: 0, embedError: 'no session' };
-      const res = await fetch('/api/embed-context', {
-        method:  'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ contextId: data.id }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!json.success) {
-        return { ...mapContext(data), chunkCount: 0, embedError: json.error || `HTTP ${res.status}` };
+      let inserted = 0;
+      for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+        const slice = chunks.slice(i, i + BATCH_SIZE);
+        const payload = {
+          contextId: data.id,
+          projectId: project.id,
+          replaceExisting: i === 0,
+          chunks: slice.map((text, j) => ({ idx: i + j, text })),
+        };
+        const res = await fetch('/api/embed-chunks', {
+          method:  'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!json.success) {
+          return {
+            ...mapContext(data),
+            chunkCount: inserted,
+            embedError: `Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${json.error || `HTTP ${res.status}`}`,
+          };
+        }
+        inserted += json.inserted || slice.length;
+        item.onEmbedProgress?.({ done: inserted, total: chunks.length });
       }
-      return { ...mapContext(data), chunkCount: json.chunkCount || 0 };
+      return { ...mapContext(data), chunkCount: inserted };
     } catch (e) {
-      console.warn('embed-context failed:', e.message);
+      console.warn('embed-chunks failed:', e.message);
       return { ...mapContext(data), chunkCount: 0, embedError: e.message };
     }
   };

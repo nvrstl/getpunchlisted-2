@@ -8,12 +8,12 @@ import { cn } from '../lib/utils';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 
-// Mirror the pdf.js worker setup used in ContextManager so PDF extraction
-// works the same way regardless of which upload UI the user clicks.
-if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-}
+// Use the worker bundled with pdfjs-dist — Vite resolves the URL at build
+// time. Matches ContextManager so PDF extraction behaves identically.
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url
+).toString();
 
 async function extractPdfText(file, onProgress) {
   const arrayBuffer = await file.arrayBuffer();

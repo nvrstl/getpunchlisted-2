@@ -25,49 +25,66 @@ const STOPWORDS = new Set([
   'will','would','should','could','may','might','can','this','these','those','it',
 ]);
 
-// When raw_text is bigger than the per-doc budget, slice into overlapping
-// chunks, score each by how many question keywords it contains, and return
-// the top-scoring chunks in original order. Falls back to the first N chars
-// if the question yields no useful keywords or no chunks match.
+// When raw_text is bigger than the per-doc budget, return:
+//   1. ALWAYS the first ~10k chars (TOC/intro, helps with overview questions)
+//   2. PLUS the highest-scoring keyword chunks for the question
+// concatenated in original document order with [...] separators.
 function relevantSlice(rawText, question, budget) {
   if (!rawText) return '';
   if (rawText.length <= budget) return rawText;
 
+  // Always include the head — table of contents + intro live there.
+  const HEAD = Math.min(rawText.length, Math.min(10000, Math.floor(budget * 0.3)));
+  const headSlice = rawText.slice(0, HEAD);
+  let remaining = budget - HEAD;
+
+  // Score chunks from the REST of the document
+  const tail = rawText.slice(HEAD);
+  if (tail.length <= remaining) return rawText.slice(0, budget);
+
   const words = (question || '').toLowerCase().match(/[\p{L}]{3,}/gu) || [];
   const keywords = [...new Set(words.filter(w => !STOPWORDS.has(w)))];
-  if (keywords.length === 0) return rawText.slice(0, budget);
 
   const CHUNK = 2000;
   const STEP  = 1600;            // 400-char overlap so clauses on the seam aren't lost
   const chunks = [];
-  for (let i = 0; i < rawText.length; i += STEP) {
-    const text = rawText.slice(i, i + CHUNK);
+  for (let i = 0; i < tail.length; i += STEP) {
+    const text = tail.slice(i, i + CHUNK);
     if (!text.trim()) continue;
-    const lower = text.toLowerCase();
     let score = 0;
-    for (const k of keywords) {
-      const matches = lower.match(new RegExp(`\\b${k}\\b`, 'g'));
-      if (matches) score += matches.length;
+    if (keywords.length) {
+      const lower = text.toLowerCase();
+      for (const k of keywords) {
+        const matches = lower.match(new RegExp(`\\b${k}\\b`, 'g'));
+        if (matches) score += matches.length;
+      }
     }
-    chunks.push({ start: i, text, score });
+    chunks.push({ start: HEAD + i, text, score });
   }
 
   const sorted = [...chunks].sort((a, b) => b.score - a.score);
   const picked = [];
   let total = 0;
   for (const c of sorted) {
-    // Stop once we hit no-score chunks AND already have something relevant.
-    if (c.score === 0 && picked.some(p => p.score > 0)) break;
-    if (total + c.text.length > budget) continue;
+    // If question yielded keywords but this chunk doesn't match AND we
+    // already have relevant ones, stop. If no keywords (generic question),
+    // pick chunks in original order until budget fills.
+    if (keywords.length && c.score === 0 && picked.some(p => p.score > 0)) break;
+    if (total + c.text.length > remaining) continue;
     picked.push(c);
     total += c.text.length;
-    if (total >= budget * 0.95) break;
+    if (total >= remaining * 0.95) break;
   }
-  if (picked.length === 0) return rawText.slice(0, budget);
 
-  // Original document order with separators so the model knows chunks aren't contiguous.
   picked.sort((a, b) => a.start - b.start);
-  return picked.map(c => c.text).join('\n[…]\n');
+  const parts = [headSlice];
+  let lastEnd = HEAD;
+  for (const c of picked) {
+    if (c.start > lastEnd) parts.push('[…]');
+    parts.push(c.text);
+    lastEnd = c.start + c.text.length;
+  }
+  return parts.join('\n');
 }
 
 export default async function handler(req, res) {
@@ -101,22 +118,24 @@ export default async function handler(req, res) {
     // block explicitly so the model knows whether it has full text or
     // only a summary — without this it hedges ("text extraction not done").
     //
-    // Adaptive per-doc cap: total document budget is ~60k chars across all
-    // docs. 1 doc gets up to 50k, 2 → 30k each, 3 → 20k, etc. For docs that
-    // exceed their cap, relevantSlice scores chunks by question keywords
-    // and returns the most relevant portions (cheap retrieval, no embeddings).
+    // Adaptive per-doc cap. Haiku has a 200k-token context window so we can
+    // afford generous budgets. 1 doc → 120k chars (≈ 60 pages of dense
+    // text), 2 → 60k each, 3 → 40k, etc. For docs that exceed their cap,
+    // relevantSlice always includes the head (TOC + intro) plus the
+    // highest-scoring keyword chunks for the question.
     const docs = ctx || [];
     const perDocCap = docs.length
-      ? Math.max(4000, Math.min(50000, Math.floor(60000 / docs.length)))
+      ? Math.max(8000, Math.min(120000, Math.floor(120000 / docs.length)))
       : 0;
     const ctxBlock = docs.map(i => {
       const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
       const full   = hasRaw ? i.raw_text : (i.content || '');
       const body   = relevantSlice(full, message, perDocCap);
       const kind   = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
-      const sizeHint = (hasRaw && full.length > perDocCap)
-        ? ` · ${(full.length / 1000).toFixed(0)}k chars totaal, relevante fragmenten getoond`
-        : '';
+      const truncated = hasRaw && full.length > perDocCap;
+      const sizeHint = truncated
+        ? ` · ${(full.length / 1000).toFixed(0)}k karakters totaal — inhoudstafel + ${((body.length - 10000) / 1000).toFixed(0)}k aan vraag-relevante fragmenten getoond`
+        : (hasRaw ? ` · volledig in geheugen` : '');
       const head = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}${sizeHint}]`;
       return `${head}\n${body}`;
     }).join('\n\n');
@@ -152,9 +171,11 @@ CONTEXT-DOCUMENTEN (volledige tekst van offerte, lastenboek, contract, e-mails)
 ${ctxBlock || '(geen documenten geüpload)'}
 
 DOCUMENT-QUOTING:
-Elke documentkop eindigt op "— VOLLEDIGE TEKST" of "— SAMENVATTING".
+Elke documentkop eindigt op "— VOLLEDIGE TEKST" of "— SAMENVATTING", optioneel gevolgd door een groottehint zoals "230k karakters totaal — inhoudstafel + 110k aan vraag-relevante fragmenten getoond".
+
 - Bij VOLLEDIGE TEKST mag je letterlijk citeren met aanhalingstekens en bronvermelding. Voorbeeld: "In het lastenboek staat: 'levering uiterlijk 15 mei' (bron: lastenboek-v3.pdf)". Verzin nooit een citaat.
-- Bij SAMENVATTING antwoord je op basis van de samenvatting zelf — beweer NOOIT dat "de tekst nog niet geëxtraheerd is" of "het document nog verwerkt wordt". De samenvatting IS wat je hebt; werk ermee. Begin je antwoord met "Volgens de samenvatting van <titel>..." in plaats van te citeren.
+- Bij SAMENVATTING antwoord je op basis van de samenvatting zelf — beweer NOOIT dat "de tekst nog niet geëxtraheerd is". De samenvatting IS wat je hebt; werk ermee. Begin je antwoord met "Volgens de samenvatting van <titel>...".
+- Wanneer de hint zegt dat "vraag-relevante fragmenten getoond" zijn: je hebt het VOLLEDIGE document tot je beschikking — er zijn enkel automatisch de meest relevante stukken voor déze vraag geselecteerd plus de inhoudstafel. Beweer NOOIT dat je "alleen het begin" of "alleen een deel" hebt. Als de gevraagde inhoud niet in de getoonde fragmenten staat, antwoord met "Ik zie die specifieke passage niet in de relevante fragmenten — probeer een meer specifieke vraag (bv. een artikelnummer of trefwoord)" in plaats van te zeggen dat het document onvolledig is.
 
 INBOX — alle binnenkomende berichten (voice, e-mail, manuele log, WhatsApp; max 200 recent)
 ${logsBlock || '(nog geen inbox-items)'}

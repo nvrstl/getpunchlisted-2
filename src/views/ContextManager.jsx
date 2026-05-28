@@ -148,11 +148,15 @@ function PDFUploadPanel({ onSuccess }) {
       if (!text.trim()) throw new Error('Could not extract text from this PDF (may be scanned/image-only).');
       setStats(s => ({ ...s, pages, chars }));
       setStatus('processing');
-      const excerpt = text.length > 40000 ? text.slice(0, 40000) : text;
+      // Only the first 30k chars go to the AI for summarising — that's enough
+      // for Haiku to classify + summarise without burning tokens. The chat
+      // uses raw_text directly for clause-level questions, so we store the
+      // full extracted text (up to 1 MB) rather than the AI excerpt.
+      const summaryInput = text.length > 30000 ? text.slice(0, 30000) : text;
       const res = await fetch('/api/process-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: excerpt, filename: file.name }),
+        body: JSON.stringify({ text: summaryInput, filename: file.name }),
       });
       if (!res.ok) {
         const msg = await res.text().catch(() => `HTTP ${res.status}`);
@@ -164,7 +168,9 @@ function PDFUploadPanel({ onSuccess }) {
       const content = [summary, '', ...keyPoints.map(k => `• ${k}`)].join('\n');
       setStats(s => ({ ...s, summaryLen: content.length, category }));
       setStatus('saving');
-      const raw_text = excerpt.length > 80000 ? excerpt.slice(0, 80000) : excerpt;
+      // Postgres TEXT has no hard limit; we cap at 1 MB to keep row size
+      // manageable and avoid pathological 1000-page PDFs blowing things up.
+      const raw_text = text.length > 1_000_000 ? text.slice(0, 1_000_000) : text;
       await onSuccess({ category, title, content, raw_text, source: file.name });
       setStatus('done');
       resetAfterDelay();

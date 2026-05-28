@@ -13,6 +13,63 @@ const supabase  = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY,
 );
 
+// Dutch + English stopwords. Short list — drop function words so keyword
+// matching focuses on the topic of the question.
+const STOPWORDS = new Set([
+  'de','het','een','en','of','van','op','in','aan','dat','is','niet','met','voor',
+  'door','te','om','wat','wie','waar','hoe','wanneer','welke','welk','dan','maar',
+  'als','ook','er','zijn','was','wordt','worden','heeft','hebben','had','kan','kunnen',
+  'moet','moeten','mag','mogen','wil','willen','zou','zouden','staat','staan',
+  'the','a','an','and','or','of','on','in','at','to','for','from','by','with','that',
+  'is','are','was','were','be','been','being','has','have','had','do','does','did',
+  'will','would','should','could','may','might','can','this','these','those','it',
+]);
+
+// When raw_text is bigger than the per-doc budget, slice into overlapping
+// chunks, score each by how many question keywords it contains, and return
+// the top-scoring chunks in original order. Falls back to the first N chars
+// if the question yields no useful keywords or no chunks match.
+function relevantSlice(rawText, question, budget) {
+  if (!rawText) return '';
+  if (rawText.length <= budget) return rawText;
+
+  const words = (question || '').toLowerCase().match(/[\p{L}]{3,}/gu) || [];
+  const keywords = [...new Set(words.filter(w => !STOPWORDS.has(w)))];
+  if (keywords.length === 0) return rawText.slice(0, budget);
+
+  const CHUNK = 2000;
+  const STEP  = 1600;            // 400-char overlap so clauses on the seam aren't lost
+  const chunks = [];
+  for (let i = 0; i < rawText.length; i += STEP) {
+    const text = rawText.slice(i, i + CHUNK);
+    if (!text.trim()) continue;
+    const lower = text.toLowerCase();
+    let score = 0;
+    for (const k of keywords) {
+      const matches = lower.match(new RegExp(`\\b${k}\\b`, 'g'));
+      if (matches) score += matches.length;
+    }
+    chunks.push({ start: i, text, score });
+  }
+
+  const sorted = [...chunks].sort((a, b) => b.score - a.score);
+  const picked = [];
+  let total = 0;
+  for (const c of sorted) {
+    // Stop once we hit no-score chunks AND already have something relevant.
+    if (c.score === 0 && picked.some(p => p.score > 0)) break;
+    if (total + c.text.length > budget) continue;
+    picked.push(c);
+    total += c.text.length;
+    if (total >= budget * 0.95) break;
+  }
+  if (picked.length === 0) return rawText.slice(0, budget);
+
+  // Original document order with separators so the model knows chunks aren't contiguous.
+  picked.sort((a, b) => a.start - b.start);
+  return picked.map(c => c.text).join('\n[…]\n');
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const { projectId, message, history = [] } = req.body || {};
@@ -45,19 +102,23 @@ export default async function handler(req, res) {
     // only a summary — without this it hedges ("text extraction not done").
     //
     // Adaptive per-doc cap: total document budget is ~60k chars across all
-    // docs. 1 doc gets up to 40k (full PDFs typically), 2 → 30k each, 3 → 20k,
-    // 4 → 15k, and so on. Floor at 4k so a project with many docs still
-    // gets useful content out of each.
+    // docs. 1 doc gets up to 50k, 2 → 30k each, 3 → 20k, etc. For docs that
+    // exceed their cap, relevantSlice scores chunks by question keywords
+    // and returns the most relevant portions (cheap retrieval, no embeddings).
     const docs = ctx || [];
     const perDocCap = docs.length
-      ? Math.max(4000, Math.min(40000, Math.floor(60000 / docs.length)))
+      ? Math.max(4000, Math.min(50000, Math.floor(60000 / docs.length)))
       : 0;
     const ctxBlock = docs.map(i => {
       const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
-      const body   = hasRaw ? i.raw_text : (i.content || '');
+      const full   = hasRaw ? i.raw_text : (i.content || '');
+      const body   = relevantSlice(full, message, perDocCap);
       const kind   = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
-      const head   = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}]`;
-      return `${head}\n${body.slice(0, perDocCap)}`;
+      const sizeHint = (hasRaw && full.length > perDocCap)
+        ? ` · ${(full.length / 1000).toFixed(0)}k chars totaal, relevante fragmenten getoond`
+        : '';
+      const head = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}${sizeHint}]`;
+      return `${head}\n${body}`;
     }).join('\n\n');
 
     const contactsBlock = (contacts || []).length

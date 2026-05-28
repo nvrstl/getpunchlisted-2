@@ -163,11 +163,14 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
       setUploadStats(s => ({ ...s, pages, chars }));
 
       setUploadPhase('processing');
-      const excerpt = text.length > 40000 ? text.slice(0, 40000) : text;
+      // Only send first 30k chars to AI for summary (Haiku doesn't need more
+      // to classify and summarise). Store the full extracted text — chat
+      // pulls relevant chunks from raw_text per question.
+      const summaryInput = text.length > 30000 ? text.slice(0, 30000) : text;
       const res = await fetch('/api/process-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: excerpt, filename: file.name }),
+        body: JSON.stringify({ text: summaryInput, filename: file.name }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'AI-verwerking mislukt');
@@ -176,7 +179,9 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
 
       const finalTitle    = aiTitle || file.name.replace(/\.[^.]+$/, '');
       const finalCategory = aiCategory || 'quote';
-      const finalRawText  = excerpt.length > 80000 ? excerpt.slice(0, 80000) : excerpt;
+      // Cap raw_text at 1 MB so a pathological 1000-page PDF doesn't bloat
+      // the row. Postgres TEXT could hold more, but this stays comfortable.
+      const finalRawText  = text.length > 1_000_000 ? text.slice(0, 1_000_000) : text;
       // Show the autofilled fields so the user sees what's been captured.
       setTitle(finalTitle);
       setContent(composed);

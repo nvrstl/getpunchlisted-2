@@ -119,50 +119,63 @@ export default async function handler(req, res) {
     // block explicitly so the model knows whether it has full text or
     // only a summary — without this it hedges ("text extraction not done").
     //
-    // ── Document retrieval strategy ────────────────────────────────────────
-    // 1. Vector search across context_chunks (semantic, scales to 5+ huge
-    //    contracts). Requires the add_context_chunks.sql migration applied
-    //    and OPENAI_API_KEY set. Returns null on either failure.
-    // 2. If vector search returns nothing useful (no embeddings yet, or no
-    //    chunks above the relevance bar), fall back to relevantSlice which
-    //    does keyword-based chunk selection over raw_text per document.
+    // ── Document retrieval ─────────────────────────────────────────────────
+    // Belt-and-suspenders: run BOTH retrievals and union the results.
+    //   - Vector search: semantic similarity (catches "merken stopcontacten"
+    //     even when the question wording doesn't exactly match the document)
+    //   - Keyword slice: always includes TOC/intro + paragraphs matching
+    //     the question terms (catches brand names, article numbers,
+    //     specific keywords vectors might miss)
+    // For each document we concatenate the keyword head + any extra vector
+    // chunks that aren't already inside it. Budget per doc adapts to count.
     const docs = ctx || [];
-    let ctxBlock = '';
+    const perDocCap = docs.length
+      ? Math.max(8000, Math.min(120000, Math.floor(120000 / docs.length)))
+      : 0;
+
     const vectorChunks = await retrieveRelevantChunks(supabase, {
       projectId,
       question: message,
-      matchCount: 30,
+      matchCount: 50,
     });
-
-    if (vectorChunks && vectorChunks.length > 0) {
-      const grouped = groupChunksByContext(vectorChunks, docs);
-      ctxBlock = grouped.map(({ row, chunks, bestScore }) => {
-        const kind = row.raw_text ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
-        const sizeNote = row.raw_text
-          ? ` · ${(row.raw_text.length / 1000).toFixed(0)}k karakters totaal — ${chunks.length} semantisch-relevante fragmenten getoond (similariteit ${(bestScore * 100).toFixed(0)}%)`
-          : '';
-        const head = `[${row.category?.toUpperCase()} — ${row.title}${row.source ? ` · ${row.source}` : ''} — ${kind}${sizeNote}]`;
-        const body = chunks.map(c => c.text).join('\n[…]\n');
-        return `${head}\n${body}`;
-      }).join('\n\n');
-    } else {
-      // Keyword fallback. Adaptive per-doc cap: 1 doc → 120k chars; 2 → 60k each, etc.
-      const perDocCap = docs.length
-        ? Math.max(8000, Math.min(120000, Math.floor(120000 / docs.length)))
-        : 0;
-      ctxBlock = docs.map(i => {
-        const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
-        const full   = hasRaw ? i.raw_text : (i.content || '');
-        const body   = relevantSlice(full, message, perDocCap);
-        const kind   = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
-        const truncated = hasRaw && full.length > perDocCap;
-        const sizeHint = truncated
-          ? ` · ${(full.length / 1000).toFixed(0)}k karakters totaal — inhoudstafel + ${((body.length - 10000) / 1000).toFixed(0)}k aan vraag-relevante fragmenten getoond`
-          : (hasRaw ? ` · volledig in geheugen` : '');
-        const head = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}${sizeHint}]`;
-        return `${head}\n${body}`;
-      }).join('\n\n');
+    const vectorByCtx = new Map();
+    if (vectorChunks?.length) {
+      for (const ch of vectorChunks) {
+        if (!vectorByCtx.has(ch.project_context_id)) vectorByCtx.set(ch.project_context_id, []);
+        vectorByCtx.get(ch.project_context_id).push(ch);
+      }
     }
+
+    const ctxBlock = docs.map(i => {
+      const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
+      const full   = hasRaw ? i.raw_text : (i.content || '');
+      const kwBody = relevantSlice(full, message, Math.floor(perDocCap * 0.7));
+
+      // Append any vector chunks not already inside the keyword body.
+      const semChunks = (vectorByCtx.get(i.id) || [])
+        .filter(c => !kwBody.includes(c.text.slice(0, 80)));
+      const semBudget = perDocCap - kwBody.length;
+      const semPicked = [];
+      let semTotal = 0;
+      for (const c of semChunks) {
+        if (semTotal + c.text.length > semBudget) break;
+        semPicked.push(c.text);
+        semTotal += c.text.length;
+      }
+
+      const kind     = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
+      const haveVec  = semPicked.length > 0;
+      const vecCount = (vectorByCtx.get(i.id) || []).length;
+      const sizeHint = hasRaw
+        ? ` · ${(full.length / 1000).toFixed(0)}k karakters totaal — ${haveVec ? `${vecCount} semantisch + ` : ''}vraag-relevante fragmenten getoond`
+        : '';
+      const head = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}${sizeHint}]`;
+
+      const body = semPicked.length
+        ? `${kwBody}\n[Aanvullende semantisch-relevante fragmenten:]\n${semPicked.join('\n[…]\n')}`
+        : kwBody;
+      return `${head}\n${body}`;
+    }).join('\n\n');
 
     const contactsBlock = (contacts || []).length
       ? (contacts || []).map(c => `· ${c.name}${c.role ? ` (${c.role})` : ''}${c.email ? ` — ${c.email}` : ''}${c.phone ? ` — ${c.phone}` : ''}`).join('\n')
@@ -194,12 +207,26 @@ ${contactsBlock}
 CONTEXT-DOCUMENTEN (volledige tekst van offerte, lastenboek, contract, e-mails)
 ${ctxBlock || '(geen documenten geüpload)'}
 
-DOCUMENT-QUOTING:
-Elke documentkop eindigt op "— VOLLEDIGE TEKST" of "— SAMENVATTING", optioneel gevolgd door een groottehint zoals "230k karakters totaal — inhoudstafel + 110k aan vraag-relevante fragmenten getoond".
+DOCUMENT-QUOTING (BELANGRIJK — lees voor je antwoordt):
+Elke documentkop eindigt op "— VOLLEDIGE TEKST" of "— SAMENVATTING", optioneel met een groottehint zoals "230k karakters totaal — 8 semantisch + vraag-relevante fragmenten getoond".
 
-- Bij VOLLEDIGE TEKST mag je letterlijk citeren met aanhalingstekens en bronvermelding. Voorbeeld: "In het lastenboek staat: 'levering uiterlijk 15 mei' (bron: lastenboek-v3.pdf)". Verzin nooit een citaat.
-- Bij SAMENVATTING antwoord je op basis van de samenvatting zelf — beweer NOOIT dat "de tekst nog niet geëxtraheerd is". De samenvatting IS wat je hebt; werk ermee. Begin je antwoord met "Volgens de samenvatting van <titel>...".
-- Wanneer de hint zegt dat "vraag-relevante fragmenten getoond" zijn: je hebt het VOLLEDIGE document tot je beschikking — er zijn enkel automatisch de meest relevante stukken voor déze vraag geselecteerd plus de inhoudstafel. Beweer NOOIT dat je "alleen het begin" of "alleen een deel" hebt. Als de gevraagde inhoud niet in de getoonde fragmenten staat, antwoord met "Ik zie die specifieke passage niet in de relevante fragmenten — probeer een meer specifieke vraag (bv. een artikelnummer of trefwoord)" in plaats van te zeggen dat het document onvolledig is.
+Het document IS volledig opgeslagen in het projectgeheugen. Wat je in dit gesprek krijgt is een automatische selectie van inhoudstafel + de meest relevante passages voor déze specifieke vraag.
+
+VERBODEN antwoorden — schrijf deze NOOIT:
+✗ "Het volledige document is niet beschikbaar in mijn geheugen"
+✗ "De rest van het document is niet geëxtraheerd"
+✗ "Ik heb alleen het begin / een deel van het document"
+✗ "Het document is nog niet volledig verwerkt"
+✗ "Je zou de volledige versie nodig hebben"
+
+TOEGESTANE antwoorden wanneer je de gevraagde info NIET ziet in de fragmenten:
+✓ "Die specifieke passage zit niet in de getoonde fragmenten. Probeer een specifieker trefwoord (bv. een artikelnummer of merknaam) zodat de juiste sectie wordt opgehaald."
+✓ Als de vraag een merk/leverancier is: "Ik zie merkverwijzingen X, Y en Z in de getoonde fragmenten, maar niets specifiek over <vraag>."
+✓ Citeer wel altijd wat je WEL ziet — geef de gebruiker iets om mee verder te kunnen.
+
+Bij VOLLEDIGE TEKST mag je letterlijk citeren met aanhalingstekens en bronvermelding. Voorbeeld: "In het lastenboek staat: 'levering uiterlijk 15 mei' (bron: lastenboek-v3.pdf)". Verzin nooit een citaat.
+
+Bij SAMENVATTING werk je met de samenvatting zelf — beweer NOOIT dat "de tekst nog niet geëxtraheerd is". Begin met "Volgens de samenvatting van <titel>...".
 
 INBOX — alle binnenkomende berichten (voice, e-mail, manuele log, WhatsApp; max 200 recent)
 ${logsBlock || '(nog geen inbox-items)'}

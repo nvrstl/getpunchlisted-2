@@ -50,6 +50,24 @@ const EXTRACTORS = {
   'application/vnd.ms-excel': extractXlsxText,
 };
 
+// For large documents send three samples (beginning, middle, end) so the
+// AI titles + categorises based on the WHOLE document. A 500-page Bestek
+// containing both Fluïda AND Elektriciteit gets a multi-domain title
+// instead of being labelled by whatever happens to lead the file.
+function buildSampledExcerpt(text) {
+  if (text.length <= 30000) return text;
+  const SAMPLE = 10000;
+  const beginning = text.slice(0, SAMPLE);
+  const midStart  = Math.floor((text.length - SAMPLE) / 2);
+  const middle    = text.slice(midStart, midStart + SAMPLE);
+  const end       = text.slice(text.length - SAMPLE);
+  return [
+    '[BEGIN VAN DOCUMENT]',  beginning,
+    '\n[MIDDEN VAN DOCUMENT]', middle,
+    '\n[EINDE VAN DOCUMENT]',  end,
+  ].join('\n');
+}
+
 /* ─────────────────────────────────────────────────────────────────────────── */
 /*  Generic right-side drawer                                                  */
 /* ─────────────────────────────────────────────────────────────────────────── */
@@ -194,7 +212,7 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
       }
 
       patchQueueItem(id, { status: 'processing' });
-      const summaryInput = text.length > 30000 ? text.slice(0, 30000) : text;
+      const summaryInput = buildSampledExcerpt(text);
       const res = await fetch('/api/process-document', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -259,10 +277,10 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
       setUploadStats(s => ({ ...s, pages, chars }));
 
       setUploadPhase('processing');
-      // Only send first 30k chars to AI for summary (Haiku doesn't need more
-      // to classify and summarise). Store the full extracted text — chat
-      // pulls relevant chunks from raw_text per question.
-      const summaryInput = text.length > 30000 ? text.slice(0, 30000) : text;
+      // For large docs send beginning + middle + end samples so the AI
+      // titles + classifies based on the whole document. Storage of the
+      // full raw_text below is unaffected.
+      const summaryInput = buildSampledExcerpt(text);
       const res = await fetch('/api/process-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

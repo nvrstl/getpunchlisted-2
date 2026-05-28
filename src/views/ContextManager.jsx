@@ -57,6 +57,24 @@ const ACCEPTED_TYPES = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': extractXlsxText,
   'application/vnd.ms-excel': extractXlsxText,
 };
+
+// For large documents send three samples (beginning, middle, end) so the
+// AI can title + categorise based on the WHOLE document, not just whatever
+// happens to be on page 1. Each sample is ~10k chars; samples are joined
+// with explicit markers the prompt is told to interpret.
+function buildSampledExcerpt(text) {
+  if (text.length <= 30000) return text;
+  const SAMPLE = 10000;
+  const beginning = text.slice(0, SAMPLE);
+  const midStart  = Math.floor((text.length - SAMPLE) / 2);
+  const middle    = text.slice(midStart, midStart + SAMPLE);
+  const end       = text.slice(text.length - SAMPLE);
+  return [
+    '[BEGIN VAN DOCUMENT]',  beginning,
+    '\n[MIDDEN VAN DOCUMENT]', middle,
+    '\n[EINDE VAN DOCUMENT]',  end,
+  ].join('\n');
+}
 const ACCEPT_ATTR = '.pdf,.xlsx,.xls';
 
 const spring = { type: 'spring', stiffness: 300, damping: 28 };
@@ -148,11 +166,12 @@ function PDFUploadPanel({ onSuccess }) {
       if (!text.trim()) throw new Error('Could not extract text from this PDF (may be scanned/image-only).');
       setStats(s => ({ ...s, pages, chars }));
       setStatus('processing');
-      // Only the first 30k chars go to the AI for summarising — that's enough
-      // for Haiku to classify + summarise without burning tokens. The chat
-      // uses raw_text directly for clause-level questions, so we store the
-      // full extracted text (up to 1 MB) rather than the AI excerpt.
-      const summaryInput = text.length > 30000 ? text.slice(0, 30000) : text;
+      // For large docs, sample beginning + middle + end so the AI can see
+      // what subjects appear throughout (a 500-page "Bestek Technieken" that
+      // covers both Fluïda AND Elektriciteit needs to be titled accordingly,
+      // not just based on the first 30k chars). Each sample is ~10k chars
+      // with clear separators the prompt knows to interpret.
+      const summaryInput = buildSampledExcerpt(text);
       const res = await fetch('/api/process-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

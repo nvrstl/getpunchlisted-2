@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './contexts/AuthContext';
 import Login from './views/Login';
+import SetPassword from './views/SetPassword';
 import ProjectSelect from './views/ProjectSelect';
 import LandingDashboard from './views/LandingDashboard.jsx';
 import Sidebar from './components/Sidebar.jsx';
@@ -125,7 +126,7 @@ const pageVariants = {
 const pageTransition = { type: 'spring', stiffness: 280, damping: 28 };
 
 export default function App() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, needsPasswordSet } = useAuth();
   const [project, setProject]       = useState(null);
   const [projects, setProjects]     = useState([]); // all projects for the user, used by the project switcher
   const [showProjectCreate, setShowProjectCreate] = useState(false);
@@ -891,6 +892,10 @@ export default function App() {
   }
 
   if (!user) return <Login />;
+
+  // Invited/recovery sessions land here first — user must set a password
+  // before the rest of the app becomes navigable.
+  if (needsPasswordSet) return <SetPassword />;
 
   // Backoffice — platform admins only, no project required
   if (view === 'backoffice' || view === 'backofficeCompany') {

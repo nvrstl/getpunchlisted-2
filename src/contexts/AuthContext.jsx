@@ -14,9 +14,23 @@ async function syncMemberships(session) {
   } catch (e) { console.warn('sync-memberships failed:', e.message); }
 }
 
+// Detects whether the user just landed on the app via a Supabase invite
+// link or password-recovery link. Supabase clears the hash before
+// onAuthStateChange fires, so we have to read it first thing on module load.
+function detectRecoveryFromHash() {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash || '';
+  return /[#&]type=(recovery|invite)\b/.test(hash);
+}
+const INITIAL_RECOVERY = detectRecoveryFromHash();
+
 export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser]                   = useState(null);
+  const [loading, setLoading]             = useState(true);
+  // True when the current session was opened via an invite or password-recovery
+  // link and the user hasn't set a permanent password yet. App shows a
+  // dedicated SetPassword screen until this flips to false.
+  const [needsPasswordSet, setNeedsPasswordSet] = useState(INITIAL_RECOVERY);
 
   useEffect(() => {
     const timeout = setTimeout(() => setLoading(false), 6000);
@@ -36,12 +50,16 @@ export function AuthProvider({ children }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      if (event === 'PASSWORD_RECOVERY') {
+        setNeedsPasswordSet(true);
+      }
       if (event === 'SIGNED_IN' && session?.user) {
         identifyUser(session.user);
         syncMemberships(session);
       }
       if (event === 'SIGNED_OUT') {
         resetUser();
+        setNeedsPasswordSet(false);
       }
     });
 
@@ -51,9 +69,11 @@ export function AuthProvider({ children }) {
   const signIn  = (email, password) => supabase.auth.signInWithPassword({ email, password });
   const signUp  = (email, password) => supabase.auth.signUp({ email, password });
   const signOut = ()                 => supabase.auth.signOut();
+  // Called by SetPassword once the user has stored a new password.
+  const clearPasswordSetFlag = ()    => setNeedsPasswordSet(false);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, needsPasswordSet, clearPasswordSetFlag }}>
       {children}
     </AuthContext.Provider>
   );

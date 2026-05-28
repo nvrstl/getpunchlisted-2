@@ -42,14 +42,22 @@ export default async function handler(req, res) {
     // AI-generated summary) so the chat can quote exact clauses. Falls back
     // to content for items uploaded before raw_text existed. Label each
     // block explicitly so the model knows whether it has full text or
-    // only a summary — without this it sometimes hedges ("text extraction
-    // not done yet") when only the summary is available.
-    const ctxBlock = (ctx || []).map(i => {
+    // only a summary — without this it hedges ("text extraction not done").
+    //
+    // Adaptive per-doc cap: total document budget is ~60k chars across all
+    // docs. 1 doc gets up to 40k (full PDFs typically), 2 → 30k each, 3 → 20k,
+    // 4 → 15k, and so on. Floor at 4k so a project with many docs still
+    // gets useful content out of each.
+    const docs = ctx || [];
+    const perDocCap = docs.length
+      ? Math.max(4000, Math.min(40000, Math.floor(60000 / docs.length)))
+      : 0;
+    const ctxBlock = docs.map(i => {
       const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
       const body   = hasRaw ? i.raw_text : (i.content || '');
       const kind   = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
       const head   = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}]`;
-      return `${head}\n${body.slice(0, 8000)}`;
+      return `${head}\n${body.slice(0, perDocCap)}`;
     }).join('\n\n');
 
     const contactsBlock = (contacts || []).length

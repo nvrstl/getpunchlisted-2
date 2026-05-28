@@ -209,7 +209,15 @@ function ChatInterface({ project, projects, userInitials, onSelectProject }) {
     // each doc so the model knows whether it has full text or only a
     // summary — without this it hedges with "text extraction not done yet"
     // when only the summary is available.
-    const perDocCap = projectScope ? 6000 : 1500;
+    //
+    // Adaptive per-doc cap so 1 contract doesn't get sliced to 6k when we
+    // have plenty of context budget. Project scope: ~60k total doc budget.
+    // Cross-project: tighter (10k) so prompts stay bounded.
+    const totalDocs = ctx.length;
+    const docBudget = projectScope ? 60000 : 10000;
+    const perDocCap = totalDocs
+      ? Math.max(2000, Math.min(40000, Math.floor(docBudget / totalDocs)))
+      : 0;
     for (const [label, items] of Object.entries(byCategory)) {
       sections.push(
         `## ${label}\n` + items.map(c => {

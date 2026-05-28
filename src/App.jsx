@@ -77,6 +77,7 @@ const mapSub = (r) => ({
 });
 const mapContext = (r) => ({
   id: r.id, category: r.category, title: r.title, content: r.content,
+  rawText: r.raw_text || null,
   source: r.source, createdAt: r.created_at,
 });
 const mapDispute = (r) => ({
@@ -598,6 +599,7 @@ export default function App() {
     const { data, error } = await supabase.from('project_context').insert({
       project_id: project.id, category: item.category, title: item.title,
       content: item.content, source: item.source || null,
+      raw_text: item.raw_text || null,
     }).select().single();
     if (error) throw new Error(error.message);
     setContextItems(prev => [mapContext(data), ...prev]);

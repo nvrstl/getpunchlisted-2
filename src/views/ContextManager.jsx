@@ -142,7 +142,11 @@ function PDFUploadPanel({ onSuccess }) {
       if (!json.success) throw new Error(json.error || 'Processing failed');
       const { title, summary, keyPoints, category } = json.data;
       const content = [summary, '', ...keyPoints.map(k => `• ${k}`)].join('\n');
-      await onSuccess({ category, title, content, source: file.name });
+      // Pass the full extracted text too — the chat uses it for clause-level
+      // quoting when the summary isn't precise enough. Capped at 80k chars
+      // so a single bloated doc can't blow out a chat prompt.
+      const raw_text = excerpt.length > 80000 ? excerpt.slice(0, 80000) : excerpt;
+      await onSuccess({ category, title, content, raw_text, source: file.name });
       setStatus('done');
     } catch (err) {
       setErrorMsg(err.message);

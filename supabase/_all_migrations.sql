@@ -1,6 +1,6 @@
 -- ============================================================
 -- Punchlister — consolidated migrations
--- Generated: 2026-05-27 08:01:07 UTC
+-- Generated: 2026-05-28 08:45:47 UTC
 -- Paste into Supabase SQL editor on a FRESH project.
 -- ============================================================
 
@@ -1033,6 +1033,18 @@ alter table projects add column if not exists architect_name  text;
 alter table projects add column if not exists architect_email text;
 alter table projects add column if not exists calculator_name  text;
 alter table projects add column if not exists calculator_email text;
+
+
+-- ────────── supabase/add_context_raw_text.sql ──────────
+-- ── Full raw text on project_context ─────────────────────────────────────────
+-- project_context.content currently stores an AI-generated summary + key
+-- points. That's enough for high-level project Q&A but means the chat can't
+-- quote clauses verbatim. Add raw_text to hold the original extracted text
+-- (PDF body, email body, etc.) so the chat can pull exact wording.
+--
+-- Nullable + safe to leave NULL on legacy rows; chats fall back to content.
+
+alter table project_context add column if not exists raw_text text;
 
 
 -- ────────── supabase/add_dispute_detection.sql ──────────

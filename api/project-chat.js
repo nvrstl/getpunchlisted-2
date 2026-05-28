@@ -27,7 +27,7 @@ export default async function handler(req, res) {
     // under control; oldest entries beyond that cap are dropped.
     const [{ data: project }, { data: ctx }, { data: contacts }, { data: logs }] = await Promise.all([
       supabase.from('projects').select('id, name, city, project_number, status, client_name, project_manager').eq('id', projectId).maybeSingle(),
-      supabase.from('project_context').select('category, title, content, source').eq('project_id', projectId).order('created_at', { ascending: false }).limit(12),
+      supabase.from('project_context').select('category, title, content, raw_text, source').eq('project_id', projectId).order('created_at', { ascending: false }).limit(12),
       supabase.from('project_contacts').select('name, role, email, phone').eq('project_id', projectId),
       supabase.from('field_logs')
         .select('id, processed_summary, raw_note, type, location, created_at, source, subject, treated')
@@ -38,9 +38,14 @@ export default async function handler(req, res) {
 
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    const ctxBlock = (ctx || []).map(i =>
-      `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''}]\n${(i.content || '').slice(0, 1500)}`
-    ).join('\n\n');
+    // Prefer raw_text (the verbatim PDF/email body) over content (the
+    // AI-generated summary) so the chat can quote exact clauses. Falls back
+    // to content for items uploaded before raw_text existed.
+    const ctxBlock = (ctx || []).map(i => {
+      const body = i.raw_text || i.content || '';
+      const head = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''}]`;
+      return `${head}\n${body.slice(0, 8000)}`;
+    }).join('\n\n');
 
     const contactsBlock = (contacts || []).length
       ? (contacts || []).map(c => `· ${c.name}${c.role ? ` (${c.role})` : ''}${c.email ? ` — ${c.email}` : ''}${c.phone ? ` — ${c.phone}` : ''}`).join('\n')
@@ -69,8 +74,11 @@ ${project.project_number ? `· Nummer: ${project.project_number}\n` : ''}${proje
 CONTACTEN
 ${contactsBlock}
 
-CONTEXT-DOCUMENTEN (offerte, lastenboek, contract, e-mails)
+CONTEXT-DOCUMENTEN (volledige tekst van offerte, lastenboek, contract, e-mails)
 ${ctxBlock || '(geen documenten geüpload)'}
+
+DOCUMENT-QUOTING:
+Wanneer een vraag een precieze clausule of bedrag betreft, citeer dan letterlijk uit een document met aanhalingstekens en vermeld de bron. Voorbeeld: "In het lastenboek staat: 'levering uiterlijk 15 mei' (bron: lastenboek-v3.pdf)". Verzin nooit een citaat — alleen letterlijke tekst die in de CONTEXT-DOCUMENTEN hierboven staat.
 
 INBOX — alle binnenkomende berichten (voice, e-mail, manuele log, WhatsApp; max 200 recent)
 ${logsBlock || '(nog geen inbox-items)'}

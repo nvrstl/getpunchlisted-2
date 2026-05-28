@@ -140,7 +140,7 @@ function ChatInterface({ project, projects, userInitials, onSelectProject }) {
         .select('project_id, task, assignee, priority, due_date')
         .in('project_id', ids).eq('status', 'pending').limit(40),
       supabase.from('project_context')
-        .select('project_id, category, title, content, source')
+        .select('project_id, category, title, content, raw_text, source')
         .in('project_id', ids).limit(60),
     ]);
 
@@ -170,10 +170,14 @@ function ChatInterface({ project, projects, userInitials, onSelectProject }) {
       const label = CATEGORY_LABELS[c.category] || (c.category ? `Categorie: ${c.category}` : 'Documenten');
       (byCategory[label] ||= []).push(c);
     }
+    // Prefer raw_text (verbatim source) over content (AI summary) so the
+    // assistant can quote clauses. Single-project chats get a generous cap;
+    // cross-project chats stay tighter to keep the prompt bounded.
+    const perDocCap = projectScope ? 6000 : 1500;
     for (const [label, items] of Object.entries(byCategory)) {
       sections.push(
         `## ${label}\n` + items.map(c =>
-          `[${nameMap[c.project_id]}] ${c.title}${c.source ? ` (${c.source})` : ''}: ${trunc(c.content, 600)}`
+          `[${nameMap[c.project_id]}] ${c.title}${c.source ? ` (${c.source})` : ''}: ${trunc(c.raw_text || c.content, perDocCap)}`
         ).join('\n')
       );
     }

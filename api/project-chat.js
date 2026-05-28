@@ -40,10 +40,15 @@ export default async function handler(req, res) {
 
     // Prefer raw_text (the verbatim PDF/email body) over content (the
     // AI-generated summary) so the chat can quote exact clauses. Falls back
-    // to content for items uploaded before raw_text existed.
+    // to content for items uploaded before raw_text existed. Label each
+    // block explicitly so the model knows whether it has full text or
+    // only a summary — without this it sometimes hedges ("text extraction
+    // not done yet") when only the summary is available.
     const ctxBlock = (ctx || []).map(i => {
-      const body = i.raw_text || i.content || '';
-      const head = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''}]`;
+      const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
+      const body   = hasRaw ? i.raw_text : (i.content || '');
+      const kind   = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
+      const head   = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}]`;
       return `${head}\n${body.slice(0, 8000)}`;
     }).join('\n\n');
 
@@ -78,7 +83,9 @@ CONTEXT-DOCUMENTEN (volledige tekst van offerte, lastenboek, contract, e-mails)
 ${ctxBlock || '(geen documenten geüpload)'}
 
 DOCUMENT-QUOTING:
-Wanneer een vraag een precieze clausule of bedrag betreft, citeer dan letterlijk uit een document met aanhalingstekens en vermeld de bron. Voorbeeld: "In het lastenboek staat: 'levering uiterlijk 15 mei' (bron: lastenboek-v3.pdf)". Verzin nooit een citaat — alleen letterlijke tekst die in de CONTEXT-DOCUMENTEN hierboven staat.
+Elke documentkop eindigt op "— VOLLEDIGE TEKST" of "— SAMENVATTING".
+- Bij VOLLEDIGE TEKST mag je letterlijk citeren met aanhalingstekens en bronvermelding. Voorbeeld: "In het lastenboek staat: 'levering uiterlijk 15 mei' (bron: lastenboek-v3.pdf)". Verzin nooit een citaat.
+- Bij SAMENVATTING antwoord je op basis van de samenvatting zelf — beweer NOOIT dat "de tekst nog niet geëxtraheerd is" of "het document nog verwerkt wordt". De samenvatting IS wat je hebt; werk ermee. Begin je antwoord met "Volgens de samenvatting van <titel>..." in plaats van te citeren.
 
 INBOX — alle binnenkomende berichten (voice, e-mail, manuele log, WhatsApp; max 200 recent)
 ${logsBlock || '(nog geen inbox-items)'}

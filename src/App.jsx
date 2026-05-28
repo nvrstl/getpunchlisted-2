@@ -596,11 +596,18 @@ export default function App() {
 
   // ── Context Items ──────────────────────────────────────────────────────────
   const addContextItem = async (item) => {
-    const { data, error } = await supabase.from('project_context').insert({
+    const payload = {
       project_id: project.id, category: item.category, title: item.title,
       content: item.content, source: item.source || null,
       raw_text: item.raw_text || null,
-    }).select().single();
+    };
+    let { data, error } = await supabase.from('project_context').insert(payload).select().single();
+    // If raw_text column doesn't exist on this Supabase yet (migration not
+    // applied), retry without it so uploads keep working.
+    if (error && /column .* raw_text/i.test(error.message)) {
+      const { raw_text, ...legacy } = payload;
+      ({ data, error } = await supabase.from('project_context').insert(legacy).select().single());
+    }
     if (error) throw new Error(error.message);
     setContextItems(prev => [mapContext(data), ...prev]);
   };

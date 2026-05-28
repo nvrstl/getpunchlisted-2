@@ -174,13 +174,39 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
       const { title: aiTitle, summary, keyPoints, category: aiCategory } = json.data;
       const composed = [summary, '', ...(keyPoints || []).map(k => `• ${k}`)].join('\n');
 
-      setTitle(aiTitle || file.name.replace(/\.[^.]+$/, ''));
+      const finalTitle    = aiTitle || file.name.replace(/\.[^.]+$/, '');
+      const finalCategory = aiCategory || 'quote';
+      const finalRawText  = excerpt.length > 80000 ? excerpt.slice(0, 80000) : excerpt;
+      // Show the autofilled fields so the user sees what's been captured.
+      setTitle(finalTitle);
       setContent(composed);
-      setCategory(aiCategory || 'quote');
-      setRawText(excerpt.length > 80000 ? excerpt.slice(0, 80000) : excerpt);
+      setCategory(finalCategory);
+      setRawText(finalRawText);
       setUploadStats(s => ({ ...s, summaryLen: composed.length }));
-      setUploadPhase('done');
-      setTimeout(() => setUploadPhase(null), 2000);
+
+      // Auto-save — no need for an extra Toevoegen click. Saves the doc
+      // immediately with raw_text populated. The form closes on success
+      // and the new entry appears in the list above.
+      try {
+        await onAdd({
+          category: finalCategory,
+          title:    finalTitle.trim(),
+          content:  composed.trim(),
+          source:   file.name,
+          raw_text: finalRawText,
+        });
+        setUploadPhase('done');
+        // Reset form state so a subsequent upload starts fresh.
+        setTimeout(() => {
+          setTitle(''); setContent(''); setSource(''); setRawText('');
+          setUploadPhase(null);
+          setAdding(false);
+        }, 1500);
+      } catch (saveErr) {
+        // Save failed — leave the form open so the user can fix + retry.
+        setError(`Opslaan mislukt: ${saveErr.message}`);
+        setUploadPhase('error');
+      }
     } catch (err) {
       setError(err.message);
       setUploadPhase('error');
@@ -334,7 +360,7 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
                 );
               })}
               {uploadPhase === 'done' && (
-                <p className="text-[11px] text-[#075e48] font-medium pt-1">Klaar — controleer de velden en klik Toevoegen.</p>
+                <p className="text-[11px] text-[#075e48] font-medium pt-1">Document toegevoegd!</p>
               )}
             </div>
           )}

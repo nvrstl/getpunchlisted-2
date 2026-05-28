@@ -17,6 +17,12 @@ export default async function handler(req, res) {
 
   const { contextId } = req.body || {};
   if (!contextId) return res.status(400).json({ success: false, error: 'contextId required' });
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(503).json({
+      success: false,
+      error: 'OPENAI_API_KEY not set on server — embeddings disabled. Set it in Vercel env vars (Production scope) and redeploy.',
+    });
+  }
 
   try {
     const { data: row, error: fetchErr } = await supabaseAdmin
@@ -50,7 +56,14 @@ export default async function handler(req, res) {
       embedding:          embeddings[i],
     }));
     const { error: insErr } = await supabaseAdmin.from('context_chunks').insert(rows);
-    if (insErr) throw new Error(insErr.message);
+    if (insErr) {
+      // The most common cause of an insert error on context_chunks is the
+      // pgvector migration not being applied. Surface it clearly.
+      if (/relation .* context_chunks .* does not exist/i.test(insErr.message)) {
+        throw new Error('context_chunks table not found — apply supabase/add_context_chunks.sql migration first');
+      }
+      throw new Error(insErr.message);
+    }
 
     return res.json({
       success:    true,

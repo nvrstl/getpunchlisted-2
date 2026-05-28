@@ -227,14 +227,27 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
       const finalRawText  = text.length > 1_000_000 ? text.slice(0, 1_000_000) : text;
 
       patchQueueItem(id, { status: 'saving', title: finalTitle, category: finalCategory });
-      await onAdd({
+      const result = await onAdd({
         category: finalCategory,
         title:    finalTitle.trim(),
         content:  composed.trim(),
         source:   file.name,
         raw_text: finalRawText,
       });
-      patchQueueItem(id, { status: 'done' });
+      // addContextItem returns chunkCount and (optionally) embedError so we
+      // can show whether the doc is searchable in the chat.
+      if (result?.embedError) {
+        patchQueueItem(id, {
+          status: 'done',
+          chunkCount: 0,
+          embedError: result.embedError,
+        });
+      } else {
+        patchQueueItem(id, {
+          status: 'done',
+          chunkCount: result?.chunkCount ?? 0,
+        });
+      }
     } catch (err) {
       patchQueueItem(id, { status: 'error', error: err.message });
     }
@@ -440,9 +453,19 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
                     {q.status === 'error'
                       ? q.error
                       : q.status === 'done'
-                        ? `${q.category || '—'} · ${q.chars.toLocaleString('nl-BE')} karakters · ${q.pagesTotal || 1} ${q.pagesTotal === 1 ? 'pagina' : 'pagina\'s'}`
+                        ? `${q.category || '—'} · ${q.chars.toLocaleString('nl-BE')} karakters · ${q.pagesTotal || 1} ${q.pagesTotal === 1 ? 'pagina' : 'pagina\'s'}${
+                            q.chunkCount > 0
+                              ? ` · ${q.chunkCount} fragmenten doorzoekbaar`
+                              : q.embedError
+                                ? ` · ⚠ niet doorzoekbaar in chat (alleen samenvatting)`
+                                : ''}`
                         : phaseLabel}
                   </p>
+                  {q.status === 'done' && q.embedError && (
+                    <p className="text-[10px] text-amber-700 mt-0.5">
+                      Embeddings mislukt: {q.embedError}. Probeer opnieuw te uploaden, of controleer OPENAI_API_KEY in Vercel.
+                    </p>
+                  )}
                 </div>
               </div>
             );

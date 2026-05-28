@@ -620,23 +620,30 @@ export default function App() {
     if (error) throw new Error(error.message);
     setContextItems(prev => [mapContext(data), ...prev]);
 
-    // Fire-and-forget: chunk + embed in the background so the chat can do
-    // semantic retrieval over multi-hundred-page docs. Failure here doesn't
-    // block the upload — the chat falls back to keyword retrieval.
-    (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        await fetch('/api/embed-context', {
-          method:  'POST',
-          headers: {
-            'Content-Type':  'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ contextId: data.id }),
-        });
-      } catch (e) { console.warn('embed-context failed:', e.message); }
-    })();
+    // Synchronously chunk + embed. Returns chunk count + any error so the
+    // caller (upload UI) can display it. Failure here doesn't lose the
+    // document — the row is already saved — but it surfaces the problem
+    // instead of silently falling back to keyword-only retrieval.
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return { ...mapContext(data), chunkCount: 0, embedError: 'no session' };
+      const res = await fetch('/api/embed-context', {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ contextId: data.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!json.success) {
+        return { ...mapContext(data), chunkCount: 0, embedError: json.error || `HTTP ${res.status}` };
+      }
+      return { ...mapContext(data), chunkCount: json.chunkCount || 0 };
+    } catch (e) {
+      console.warn('embed-context failed:', e.message);
+      return { ...mapContext(data), chunkCount: 0, embedError: e.message };
+    }
   };
   const updateContextItem = async (id, updates) => {
     const db = { updated_at: new Date().toISOString() };

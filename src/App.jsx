@@ -619,6 +619,24 @@ export default function App() {
     }
     if (error) throw new Error(error.message);
     setContextItems(prev => [mapContext(data), ...prev]);
+
+    // Fire-and-forget: chunk + embed in the background so the chat can do
+    // semantic retrieval over multi-hundred-page docs. Failure here doesn't
+    // block the upload — the chat falls back to keyword retrieval.
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        await fetch('/api/embed-context', {
+          method:  'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ contextId: data.id }),
+        });
+      } catch (e) { console.warn('embed-context failed:', e.message); }
+    })();
   };
   const updateContextItem = async (id, updates) => {
     const db = { updated_at: new Date().toISOString() };

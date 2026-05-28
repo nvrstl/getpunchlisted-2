@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
+import { retrieveRelevantChunks, groupChunksByContext } from './_lib/retrieval.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const supabase  = createClient(
@@ -118,27 +119,50 @@ export default async function handler(req, res) {
     // block explicitly so the model knows whether it has full text or
     // only a summary — without this it hedges ("text extraction not done").
     //
-    // Adaptive per-doc cap. Haiku has a 200k-token context window so we can
-    // afford generous budgets. 1 doc → 120k chars (≈ 60 pages of dense
-    // text), 2 → 60k each, 3 → 40k, etc. For docs that exceed their cap,
-    // relevantSlice always includes the head (TOC + intro) plus the
-    // highest-scoring keyword chunks for the question.
+    // ── Document retrieval strategy ────────────────────────────────────────
+    // 1. Vector search across context_chunks (semantic, scales to 5+ huge
+    //    contracts). Requires the add_context_chunks.sql migration applied
+    //    and OPENAI_API_KEY set. Returns null on either failure.
+    // 2. If vector search returns nothing useful (no embeddings yet, or no
+    //    chunks above the relevance bar), fall back to relevantSlice which
+    //    does keyword-based chunk selection over raw_text per document.
     const docs = ctx || [];
-    const perDocCap = docs.length
-      ? Math.max(8000, Math.min(120000, Math.floor(120000 / docs.length)))
-      : 0;
-    const ctxBlock = docs.map(i => {
-      const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
-      const full   = hasRaw ? i.raw_text : (i.content || '');
-      const body   = relevantSlice(full, message, perDocCap);
-      const kind   = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
-      const truncated = hasRaw && full.length > perDocCap;
-      const sizeHint = truncated
-        ? ` · ${(full.length / 1000).toFixed(0)}k karakters totaal — inhoudstafel + ${((body.length - 10000) / 1000).toFixed(0)}k aan vraag-relevante fragmenten getoond`
-        : (hasRaw ? ` · volledig in geheugen` : '');
-      const head = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}${sizeHint}]`;
-      return `${head}\n${body}`;
-    }).join('\n\n');
+    let ctxBlock = '';
+    const vectorChunks = await retrieveRelevantChunks(supabase, {
+      projectId,
+      question: message,
+      matchCount: 30,
+    });
+
+    if (vectorChunks && vectorChunks.length > 0) {
+      const grouped = groupChunksByContext(vectorChunks, docs);
+      ctxBlock = grouped.map(({ row, chunks, bestScore }) => {
+        const kind = row.raw_text ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
+        const sizeNote = row.raw_text
+          ? ` · ${(row.raw_text.length / 1000).toFixed(0)}k karakters totaal — ${chunks.length} semantisch-relevante fragmenten getoond (similariteit ${(bestScore * 100).toFixed(0)}%)`
+          : '';
+        const head = `[${row.category?.toUpperCase()} — ${row.title}${row.source ? ` · ${row.source}` : ''} — ${kind}${sizeNote}]`;
+        const body = chunks.map(c => c.text).join('\n[…]\n');
+        return `${head}\n${body}`;
+      }).join('\n\n');
+    } else {
+      // Keyword fallback. Adaptive per-doc cap: 1 doc → 120k chars; 2 → 60k each, etc.
+      const perDocCap = docs.length
+        ? Math.max(8000, Math.min(120000, Math.floor(120000 / docs.length)))
+        : 0;
+      ctxBlock = docs.map(i => {
+        const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
+        const full   = hasRaw ? i.raw_text : (i.content || '');
+        const body   = relevantSlice(full, message, perDocCap);
+        const kind   = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
+        const truncated = hasRaw && full.length > perDocCap;
+        const sizeHint = truncated
+          ? ` · ${(full.length / 1000).toFixed(0)}k karakters totaal — inhoudstafel + ${((body.length - 10000) / 1000).toFixed(0)}k aan vraag-relevante fragmenten getoond`
+          : (hasRaw ? ` · volledig in geheugen` : '');
+        const head = `[${i.category?.toUpperCase()} — ${i.title}${i.source ? ` · ${i.source}` : ''} — ${kind}${sizeHint}]`;
+        return `${head}\n${body}`;
+      }).join('\n\n');
+    }
 
     const contactsBlock = (contacts || []).length
       ? (contacts || []).map(c => `· ${c.name}${c.role ? ` (${c.role})` : ''}${c.email ? ` — ${c.email}` : ''}${c.phone ? ` — ${c.phone}` : ''}`).join('\n')

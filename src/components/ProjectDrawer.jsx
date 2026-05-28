@@ -123,10 +123,106 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef(null);
+  const bulkRef = useRef(null);
   const [copied, setCopied] = useState(false);
   // Multi-step progress for PDF/Excel upload (mirrors ContextManager's panel).
   const [uploadPhase, setUploadPhase] = useState(null); // null | 'extracting' | 'processing' | 'done' | 'error'
   const [uploadStats, setUploadStats] = useState({ fileName: null, pagesDone: 0, pagesTotal: 0, chars: 0, summaryLen: 0 });
+  // Bulk-upload queue. Items: { id, name, status, pagesDone, pagesTotal, chars, title, category, error }
+  const [queue, setQueue] = useState([]);
+
+  // Bulk upload: pick N files at once, queue them, process sequentially.
+  // Each file is auto-extracted, AI-summarised, AI-categorised, and saved
+  // without manual confirmation. Progress appears per-file in the queue list.
+  const handleBulkFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    setError('');
+
+    const initial = files.map(f => ({
+      id:         `${f.name}-${f.size}-${Math.random().toString(36).slice(2, 8)}`,
+      name:       f.name,
+      status:     'pending', // pending | extracting | processing | saving | done | error
+      pagesDone:  0,
+      pagesTotal: 0,
+      chars:      0,
+      title:      null,
+      category:   null,
+      error:      null,
+    }));
+    setQueue(prev => [...prev, ...initial]);
+
+    // Process sequentially — pdf.js is single-threaded and OpenAI/Anthropic
+    // rate limits prefer one-at-a-time anyway. Iterate by index so we keep
+    // each File paired with its queue item.
+    for (let i = 0; i < files.length; i++) {
+      await processOneBulkFile(files[i], initial[i].id);
+    }
+  };
+
+  // Push partial state for the queued item identified by id.
+  const patchQueueItem = (id, patch) =>
+    setQueue(prev => prev.map(q => q.id === id ? { ...q, ...patch } : q));
+
+  const processOneBulkFile = async (file, id) => {
+    if (!file) return;
+    // Skip unsupported types — text-only files don't go through AI processing.
+    const extractor = EXTRACTORS[file.type];
+    const isPlainText = file.type.startsWith('text/') || /\.(txt|md|csv)$/i.test(file.name);
+    if (!extractor && !isPlainText) {
+      patchQueueItem(id, { status: 'error', error: 'Niet ondersteund bestandstype (alleen PDF, Excel, tekst)' });
+      return;
+    }
+
+    try {
+      let text, pages = 0, chars = 0;
+      if (isPlainText) {
+        text  = (await file.text()).slice(0, 50000);
+        chars = text.length;
+        patchQueueItem(id, { status: 'extracting', chars, pages: 1, pagesTotal: 1, pagesDone: 1 });
+      } else {
+        patchQueueItem(id, { status: 'extracting' });
+        const r = await extractor(file, ({ done, total }) =>
+          patchQueueItem(id, { pagesDone: done, pagesTotal: total })
+        );
+        text  = r.text;
+        pages = r.pages;
+        chars = r.chars;
+        patchQueueItem(id, { pages, chars });
+        if (!text.trim()) throw new Error('Geen tekst gevonden (mogelijk gescande PDF zonder OCR).');
+      }
+
+      patchQueueItem(id, { status: 'processing' });
+      const summaryInput = text.length > 30000 ? text.slice(0, 30000) : text;
+      const res = await fetch('/api/process-document', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text: summaryInput, filename: file.name }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'AI-verwerking mislukt');
+      const { title: aiTitle, summary, keyPoints, category: aiCategory } = json.data;
+      const composed = [summary, '', ...(keyPoints || []).map(k => `• ${k}`)].join('\n');
+      const finalTitle    = aiTitle || file.name.replace(/\.[^.]+$/, '');
+      const finalCategory = aiCategory || 'quote';
+      const finalRawText  = text.length > 1_000_000 ? text.slice(0, 1_000_000) : text;
+
+      patchQueueItem(id, { status: 'saving', title: finalTitle, category: finalCategory });
+      await onAdd({
+        category: finalCategory,
+        title:    finalTitle.trim(),
+        content:  composed.trim(),
+        source:   file.name,
+        raw_text: finalRawText,
+      });
+      patchQueueItem(id, { status: 'done' });
+    } catch (err) {
+      patchQueueItem(id, { status: 'error', error: err.message });
+    }
+  };
+
+  const clearQueue = () => setQueue([]);
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -275,13 +371,80 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
         </div>
       )}
 
+      {/* Bulk upload: pick multiple files, AI categorises + saves each one */}
+      <input ref={bulkRef} type="file" accept=".pdf,.xlsx,.xls,.txt,.md,.csv" multiple onChange={handleBulkFiles} className="hidden" />
+
+      {/* Active queue (visible while files are processing or recently finished) */}
+      {queue.length > 0 && (
+        <div className="paper-card-tight px-3 py-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
+              Verwerken ({queue.filter(q => q.status === 'done').length}/{queue.length})
+            </p>
+            {queue.every(q => q.status === 'done' || q.status === 'error') && (
+              <button onClick={clearQueue}
+                      className="text-[11px] text-[var(--text-tertiary)] hover:text-[#0c0040] cursor-pointer">
+                Verwijder lijst
+              </button>
+            )}
+          </div>
+          {queue.map(q => {
+            const phaseLabel = {
+              pending:    'Wacht…',
+              extracting: q.pagesTotal > 0 ? `Tekst lezen (${q.pagesDone}/${q.pagesTotal})` : 'Tekst lezen…',
+              processing: 'AI samenvatting genereren…',
+              saving:     'Opslaan…',
+              done:       'Klaar',
+              error:      'Mislukt',
+            }[q.status] || q.status;
+            const isBusy   = q.status === 'extracting' || q.status === 'processing' || q.status === 'saving';
+            return (
+              <div key={q.id} className="flex items-start gap-2">
+                <div className={cn(
+                  'w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
+                  q.status === 'done'  && 'bg-[#d4f7ec]',
+                  q.status === 'error' && 'bg-red-100',
+                  isBusy               && 'bg-brand/15',
+                  q.status === 'pending' && 'bg-black/[0.06]',
+                )}>
+                  {q.status === 'done'  && <Check  className="w-2.5 h-2.5 text-[#0c7a5e]" />}
+                  {q.status === 'error' && <X      className="w-2.5 h-2.5 text-red-600" />}
+                  {isBusy               && <Loader2 className="w-2.5 h-2.5 text-brand animate-spin" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] text-[var(--text-primary)] truncate">
+                    {q.title || q.name}
+                  </p>
+                  <p className={cn(
+                    'text-[10.5px] truncate',
+                    q.status === 'error' ? 'text-red-600' : 'text-[var(--text-tertiary)]',
+                  )}>
+                    {q.status === 'error'
+                      ? q.error
+                      : q.status === 'done'
+                        ? `${q.category || '—'} · ${q.chars.toLocaleString('nl-BE')} karakters · ${q.pagesTotal || 1} ${q.pagesTotal === 1 ? 'pagina' : 'pagina\'s'}`
+                        : phaseLabel}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Add button / form */}
       {!adding ? (
-        <button onClick={() => setAdding(true)}
-                className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[13px] font-medium cursor-pointer"
-                style={{ background: '#280063', color: '#fff' }}>
-          <Plus className="w-4 h-4" /> Document toevoegen
-        </button>
+        <div className="space-y-2">
+          <button onClick={() => bulkRef.current?.click()}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[13px] font-medium cursor-pointer"
+                  style={{ background: '#280063', color: '#fff' }}>
+            <Upload className="w-4 h-4" /> Documenten uploaden (bulk + auto-categorisatie)
+          </button>
+          <button onClick={() => setAdding(true)}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium cursor-pointer text-[var(--text-secondary)] hover:bg-black/[0.04]">
+            <Plus className="w-3.5 h-3.5" /> Of: handmatig toevoegen / plakken
+          </button>
+        </div>
       ) : (
         <form onSubmit={handleAdd} className="paper-card p-4 space-y-3">
           <div className="flex flex-wrap gap-1.5">

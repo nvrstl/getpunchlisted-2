@@ -31,6 +31,40 @@ const SUGGESTIONS_PROJECT = [
   'Vat de laatste werfverslagen samen',
 ];
 
+// Phased status indicator. Each phase shows a label + a thin progress bar
+// so the user knows whether we're still pulling project data or actually
+// waiting on the model. Phases:
+//   'context'  — gathering inbox / docs / contacts (Supabase queries)
+//   'thinking' — request sent to Claude, waiting on response
+function PhasedIndicator({ phase }) {
+  const meta = {
+    context:  { label: 'Context verzamelen…',       width: '35%', hint: 'Memo\'s en documenten ophalen' },
+    thinking: { label: 'Punchlister denkt na…',     width: '75%', hint: 'Claude verwerkt je vraag' },
+  }[phase] || { label: 'Bezig…', width: '50%', hint: '' };
+  return (
+    <div className="flex gap-3">
+      <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-[11px] font-bold bg-[#280063] text-[#b3aaf5]">P</div>
+      <div className="px-4 py-3 bg-[var(--surface-3)] border border-[var(--border-color)]/60 rounded-2xl rounded-tl-sm min-w-[200px]">
+        <div className="flex items-center gap-2 mb-1.5">
+          <Loader2 className="w-3 h-3 animate-spin text-[#7669ff]" />
+          <span className="text-[11px] font-medium text-[var(--text-secondary)]">{meta.label}</span>
+        </div>
+        {meta.hint && (
+          <div className="text-[10px] text-[var(--text-tertiary)] mb-2">{meta.hint}</div>
+        )}
+        <div className="h-1 w-full bg-black/[0.06] rounded-full overflow-hidden">
+          <motion.div
+            className="h-full rounded-full bg-gradient-to-r from-[#7669ff] to-[#ffabff]"
+            initial={{ width: '5%' }}
+            animate={{ width: meta.width }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TypingIndicator() {
   return (
     <div className="flex gap-3">
@@ -106,6 +140,7 @@ function ChatInterface({ project, projects, userInitials, onSelectProject }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput]       = useState('');
   const [loading, setLoading]   = useState(false);
+  const [phase, setPhase]       = useState(null); // 'context' | 'thinking' | null
   const bottomRef  = useRef(null);
 
   const projectScope = !!project;
@@ -213,9 +248,11 @@ function ChatInterface({ project, projects, userInitials, onSelectProject }) {
     setMessages(prev => [...prev, { role: 'user', content: trimmed }]);
     setInput('');
     setLoading(true);
+    setPhase('context');
 
     try {
       const context = await buildContext();
+      setPhase('thinking');
       const scopeHint = projectScope
         ? `Je werkt momenteel binnen één project: "${project.name}". Beperk je antwoord tot dit project tenzij anders gevraagd.`
         : 'Je werkt over alle projecten van de gebruiker.';
@@ -259,6 +296,7 @@ Sluit je antwoord af met een bronnenlijst op een aparte nieuwe regel (enkel als 
       }]);
     }
     setLoading(false);
+    setPhase(null);
   };
 
   const empty = messages.length === 0;
@@ -292,7 +330,7 @@ Sluit je antwoord af met een bronnenlijst op een aparte nieuwe regel (enkel als 
             ))
           )}
         </AnimatePresence>
-        {loading && <TypingIndicator />}
+        {loading && <PhasedIndicator phase={phase} />}
         <div ref={bottomRef} />
       </div>
 

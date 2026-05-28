@@ -395,10 +395,41 @@ function renderAssistantContent(text) {
   return out;
 }
 
+// Phased status — the chat endpoint does context-gathering + LLM call in
+// one HTTP request, so we can't actually observe phase transitions. We
+// approximate with a timer: show "context" for the first 1.2s, then switch
+// to "thinking". Good enough to convey "still working, not stuck."
+function PhasedChatIndicator({ phase }) {
+  const meta = {
+    context:  { label: 'Context verzamelen…',   width: '35%', hint: 'Memo\'s en documenten ophalen' },
+    thinking: { label: 'Antwoord genereren…',   width: '75%', hint: 'Punchlister verwerkt je vraag' },
+  }[phase] || { label: 'Bezig…', width: '50%', hint: '' };
+  return (
+    <div className="px-3.5 py-2.5 rounded-2xl bg-white border border-black/5 rounded-tl-sm min-w-[200px]">
+      <div className="flex items-center gap-2 mb-1.5">
+        <Loader2 className="w-3 h-3 animate-spin text-[#7669ff]" />
+        <span className="text-[11px] font-medium text-[var(--text-secondary)]">{meta.label}</span>
+      </div>
+      {meta.hint && (
+        <div className="text-[10px] text-[var(--text-tertiary)] mb-2">{meta.hint}</div>
+      )}
+      <div className="h-1 w-full bg-black/[0.06] rounded-full overflow-hidden">
+        <motion.div
+          className="h-full rounded-full bg-gradient-to-r from-[#7669ff] to-[#ffabff]"
+          initial={{ width: '5%' }}
+          animate={{ width: meta.width }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ChatPanel({ projectId, projectName }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [phase, setPhase] = useState(null);
   const [error, setError] = useState('');
   const endRef = useRef(null);
 
@@ -414,6 +445,9 @@ export function ChatPanel({ projectId, projectName }) {
     setDraft('');
     const next = [...messages, { role: 'user', content: text }];
     setMessages(next);
+    setPhase('context');
+    // After ~1.2s we're almost certainly past the SQL phase — promote to thinking.
+    const tid = setTimeout(() => setPhase('thinking'), 1200);
     try {
       const res = await fetch('/api/project-chat', {
         method: 'POST',
@@ -427,7 +461,9 @@ export function ChatPanel({ projectId, projectName }) {
       setError(err.message);
       setMessages(prev => [...prev, { role: 'assistant', content: `Fout: ${err.message}` }]);
     } finally {
+      clearTimeout(tid);
       setSending(false);
+      setPhase(null);
     }
   };
 
@@ -469,15 +505,7 @@ export function ChatPanel({ projectId, projectName }) {
         ))}
         {sending && (
           <div className="flex justify-start">
-            <div className="px-3.5 py-2.5 rounded-2xl bg-white border border-black/5 rounded-tl-sm">
-              <div className="flex gap-1">
-                {[0, 1, 2].map(i => (
-                  <motion.span key={i} className="w-1.5 h-1.5 rounded-full bg-[#7669ff]"
-                               animate={{ y: [0, -3, 0] }}
-                               transition={{ duration: 0.7, repeat: Infinity, delay: i * 0.15 }} />
-                ))}
-              </div>
-            </div>
+            <PhasedChatIndicator phase={phase} />
           </div>
         )}
         <div ref={endRef} />

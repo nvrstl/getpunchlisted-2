@@ -150,19 +150,33 @@ function ChatInterface({ project, projects, userInitials, onSelectProject }) {
       ).join('\n'),
     ];
 
+    // Include EVERY uploaded context document — grouped by category so the
+    // model can reason about "contract says X but quote says Y" etc.
+    // Previously only contract-tagged items were surfaced; quotes, notes,
+    // danger flags etc. silently disappeared from chat memory.
+    const CATEGORY_LABELS = {
+      contract_client:        'Contracten met opdrachtgever',
+      contract:               'Contracten met opdrachtgever',
+      contract_subcontractor: 'Contracten met onderaannemers',
+      quote:                  'Offertes / prijsopgaven',
+      lastenboek:             'Lastenboek / specs',
+      document:               'Documenten',
+      note:                   'Notities',
+      danger:                 'Risicoflags',
+    };
     const ctx = ctxRes.data ?? [];
-    const clientContracts = ctx.filter(c => c.category === 'contract_client' || c.category === 'contract');
-    const subContracts    = ctx.filter(c => c.category === 'contract_subcontractor');
-    if (clientContracts.length) sections.push(
-      '## Contracten met opdrachtgever\n' + clientContracts.map(c =>
-        `[${nameMap[c.project_id]}] ${c.title}: ${trunc(c.content, 300)}`
-      ).join('\n')
-    );
-    if (subContracts.length) sections.push(
-      '## Contracten met onderaannemers\n' + subContracts.map(c =>
-        `[${nameMap[c.project_id]}] ${c.title}: ${trunc(c.content, 300)}`
-      ).join('\n')
-    );
+    const byCategory = {};
+    for (const c of ctx) {
+      const label = CATEGORY_LABELS[c.category] || (c.category ? `Categorie: ${c.category}` : 'Documenten');
+      (byCategory[label] ||= []).push(c);
+    }
+    for (const [label, items] of Object.entries(byCategory)) {
+      sections.push(
+        `## ${label}\n` + items.map(c =>
+          `[${nameMap[c.project_id]}] ${c.title}${c.source ? ` (${c.source})` : ''}: ${trunc(c.content, 600)}`
+        ).join('\n')
+      );
+    }
 
     const logs = logsRes.data ?? [];
     if (logs.length) sections.push(

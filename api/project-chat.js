@@ -44,7 +44,16 @@ function relevantSlice(rawText, question, budget) {
   if (tail.length <= remaining) return rawText.slice(0, budget);
 
   const words = (question || '').toLowerCase().match(/[\p{L}]{3,}/gu) || [];
-  const keywords = [...new Set(words.filter(w => !STOPWORDS.has(w)))];
+  // Stem with prefix matching: drop common Dutch plural/diminutive endings
+  // so "stopcontacten" → prefix "stopcontact" also matches the singular
+  // and compounds like "stopcontactdoos" in the document text.
+  const stem = (w) => {
+    const stripped = w.replace(/(ten|den|sen|en|s|n|e)$/, '');
+    return stripped.length >= 4 ? stripped : w;
+  };
+  const keywords = [...new Set(
+    words.filter(w => !STOPWORDS.has(w)).map(stem).filter(k => k.length >= 4)
+  )];
 
   const CHUNK = 2000;
   const STEP  = 1600;            // 400-char overlap so clauses on the seam aren't lost
@@ -56,7 +65,9 @@ function relevantSlice(rawText, question, budget) {
     if (keywords.length) {
       const lower = text.toLowerCase();
       for (const k of keywords) {
-        const matches = lower.match(new RegExp(`\\b${k}\\b`, 'g'));
+        // Prefix match (no trailing \b) — "\bstopcontact" catches singular,
+        // plural, and compound forms in one pass.
+        const matches = lower.match(new RegExp(`\\b${k}`, 'g'));
         if (matches) score += matches.length;
       }
     }
@@ -204,7 +215,12 @@ ${project.project_number ? `· Nummer: ${project.project_number}\n` : ''}${proje
 CONTACTEN
 ${contactsBlock}
 
-CONTEXT-DOCUMENTEN (volledige tekst van offerte, lastenboek, contract, e-mails)
+DOCUMENT-INVENTARIS (alle ${docs.length} documenten in het projectgeheugen — gebruik deze lijst om te bepalen WELKE documenten er zijn, ongeacht welke fragmenten hieronder getoond zijn):
+${docs.length
+  ? docs.map(d => `· ${d.title} [${d.category || 'document'}] — ${d.raw_text ? `${(d.raw_text.length / 1000).toFixed(0)}k karakters` : `samenvatting (${(d.content || '').length} karakters)`}${d.source ? ` · bron: ${d.source}` : ''}`).join('\n')
+  : '(nog geen documenten geüpload)'}
+
+CONTEXT-DOCUMENTEN (vraag-relevante fragmenten uit bovenstaande documenten — niet de volledige tekst van elk doc, alleen wat semantisch en op trefwoord matcht met de vraag)
 ${ctxBlock || '(geen documenten geüpload)'}
 
 DOCUMENT-QUOTING (BELANGRIJK — lees voor je antwoordt):

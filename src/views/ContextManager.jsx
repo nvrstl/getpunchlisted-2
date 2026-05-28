@@ -19,7 +19,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-async function extractPdfText(file) {
+// Extractors now also return progress metadata so the upload UI can show
+// concrete numbers (page count, character count). Each takes an optional
+// onProgress callback fired after each page/sheet for live feedback on
+// large files.
+async function extractPdfText(file, onProgress) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const pages = [];
@@ -27,20 +31,25 @@ async function extractPdfText(file) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     pages.push(content.items.map(item => item.str).join(' '));
+    onProgress?.({ done: i, total: pdf.numPages });
   }
-  return pages.join('\n');
+  const text = pages.join('\n');
+  return { text, pages: pdf.numPages, chars: text.length };
 }
 
-async function extractXlsxText(file) {
+async function extractXlsxText(file, onProgress) {
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
   const parts = [];
+  let i = 0;
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
     if (csv.trim()) parts.push(`[Sheet: ${sheetName}]\n${csv}`);
+    onProgress?.({ done: ++i, total: workbook.SheetNames.length });
   }
-  return parts.join('\n\n');
+  const text = parts.join('\n\n');
+  return { text, pages: workbook.SheetNames.length, chars: text.length };
 }
 
 const ACCEPTED_TYPES = {
@@ -109,9 +118,18 @@ const getCat = (id) => CATEGORIES.find(c => c.id === id) || CATEGORIES[3];
 
 function PDFUploadPanel({ onSuccess }) {
   const inputRef  = useRef(null);
-  const [status, setStatus]     = useState('idle'); // idle | extracting | processing | done | error
+  const [status, setStatus]     = useState('idle'); // idle | extracting | processing | saving | done | error
   const [errorMsg, setErrorMsg] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  // Progress data shown alongside each step's checkmark.
+  const [stats, setStats] = useState({
+    fileName: null, pagesDone: 0, pagesTotal: 0, chars: 0, summaryLen: 0, category: null,
+  });
+
+  const resetAfterDelay = () => setTimeout(() => {
+    setStatus('idle');
+    setStats({ fileName: null, pagesDone: 0, pagesTotal: 0, chars: 0, summaryLen: 0, category: null });
+  }, 2500);
 
   const process = async (file) => {
     if (!file || !ACCEPTED_TYPES[file.type]) {
@@ -121,13 +139,15 @@ function PDFUploadPanel({ onSuccess }) {
     }
     setErrorMsg('');
     setStatus('extracting');
+    setStats(s => ({ ...s, fileName: file.name, pagesDone: 0, pagesTotal: 0, chars: 0, summaryLen: 0, category: null }));
     try {
       const extract = ACCEPTED_TYPES[file.type];
-      const text = await extract(file);
+      const { text, pages, chars } = await extract(file, ({ done, total }) =>
+        setStats(s => ({ ...s, pagesDone: done, pagesTotal: total }))
+      );
       if (!text.trim()) throw new Error('Could not extract text from this PDF (may be scanned/image-only).');
+      setStats(s => ({ ...s, pages, chars }));
       setStatus('processing');
-      // Truncate client-side — server further truncates to 30k, but this keeps the
-      // request well within the 10 mb body limit even for huge documents.
       const excerpt = text.length > 40000 ? text.slice(0, 40000) : text;
       const res = await fetch('/api/process-document', {
         method: 'POST',
@@ -142,12 +162,12 @@ function PDFUploadPanel({ onSuccess }) {
       if (!json.success) throw new Error(json.error || 'Processing failed');
       const { title, summary, keyPoints, category } = json.data;
       const content = [summary, '', ...keyPoints.map(k => `• ${k}`)].join('\n');
-      // Pass the full extracted text too — the chat uses it for clause-level
-      // quoting when the summary isn't precise enough. Capped at 80k chars
-      // so a single bloated doc can't blow out a chat prompt.
+      setStats(s => ({ ...s, summaryLen: content.length, category }));
+      setStatus('saving');
       const raw_text = excerpt.length > 80000 ? excerpt.slice(0, 80000) : excerpt;
       await onSuccess({ category, title, content, raw_text, source: file.name });
       setStatus('done');
+      resetAfterDelay();
     } catch (err) {
       setErrorMsg(err.message);
       setStatus('error');
@@ -160,7 +180,37 @@ function PDFUploadPanel({ onSuccess }) {
     if (e.dataTransfer.files[0]) process(e.dataTransfer.files[0]);
   };
 
-  const busy = status === 'extracting' || status === 'processing';
+  const busy = status === 'extracting' || status === 'processing' || status === 'saving';
+
+  // Multi-step indicator config. Each step is either pending (○), active
+  // (spinner), or completed (✓), with a stat line when relevant data is in.
+  const stepOrder = ['extracting', 'processing', 'saving', 'done'];
+  const currentStepIdx = stepOrder.indexOf(status);
+  const stepStatus = (key) => {
+    const idx = stepOrder.indexOf(key);
+    if (currentStepIdx > idx) return 'done';
+    if (currentStepIdx === idx) return 'active';
+    return 'pending';
+  };
+  const steps = [
+    {
+      key: 'extracting',
+      label: stats.pagesTotal > 0 && status === 'extracting'
+        ? `Tekst uit document lezen (${stats.pagesDone}/${stats.pagesTotal})`
+        : 'Tekst uit document lezen',
+      hint: stats.chars > 0 ? `${stats.pages} pagina${stats.pages === 1 ? '' : '\'s'} · ${stats.chars.toLocaleString('nl-BE')} karakters` : null,
+    },
+    {
+      key: 'processing',
+      label: 'AI samenvatting genereren',
+      hint: stats.summaryLen > 0 ? `${stats.summaryLen} karakters samenvatting · categorie: ${stats.category}` : null,
+    },
+    {
+      key: 'saving',
+      label: 'Opslaan in projectgeheugen',
+      hint: status === 'done' ? 'Beschikbaar in chat' : null,
+    },
+  ];
 
   return (
     <motion.div
@@ -178,20 +228,42 @@ function PDFUploadPanel({ onSuccess }) {
     >
       <input ref={inputRef} type="file" accept={ACCEPT_ATTR} className="hidden" onChange={onFileChange} />
 
-      {status === 'done' ? (
-        <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={spring} className="flex flex-col items-center gap-2">
-          <div className="w-10 h-10 rounded-full bg-[#d4f7ec] flex items-center justify-center">
-            <Check className="w-5 h-5 text-[#0c7a5e]" />
+      {(busy || status === 'done') ? (
+        <div className="flex flex-col gap-3 text-left">
+          {stats.fileName && (
+            <p className="text-[11px] font-mono text-[var(--text-tertiary)] truncate">{stats.fileName}</p>
+          )}
+          <div className="space-y-2.5">
+            {steps.map(step => {
+              const st = stepStatus(step.key);
+              return (
+                <div key={step.key} className="flex items-start gap-2.5">
+                  <div className={cn(
+                    'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
+                    st === 'done'    && 'bg-[#d4f7ec]',
+                    st === 'active'  && 'bg-brand/15',
+                    st === 'pending' && 'bg-black/[0.06]',
+                  )}>
+                    {st === 'done'   && <Check className="w-3 h-3 text-[#0c7a5e]" />}
+                    {st === 'active' && <Loader2 className="w-3 h-3 text-brand animate-spin" />}
+                    {st === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-tertiary)]/40" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={cn(
+                      'text-[12.5px] font-medium',
+                      st === 'pending' ? 'text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]',
+                    )}>{step.label}</p>
+                    {step.hint && st !== 'pending' && (
+                      <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">{step.hint}</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <p className="text-[13px] font-semibold text-[#075e48]">Document added!</p>
-        </motion.div>
-      ) : busy ? (
-        <div className="flex flex-col items-center gap-2">
-          <Loader2 className="w-8 h-8 text-brand animate-spin" />
-          <p className="text-[13px] font-medium text-[var(--text-secondary)]">
-            {status === 'extracting' ? 'Reading document…' : 'Claude is summarising the document…'}
-          </p>
-          <p className="text-[11px] text-[var(--text-tertiary)]">This takes about 10–20 seconds</p>
+          {status === 'done' && (
+            <p className="text-[12px] text-[#075e48] font-semibold text-center mt-1">Document toegevoegd!</p>
+          )}
         </div>
       ) : (
         <div className="flex flex-col items-center gap-3">

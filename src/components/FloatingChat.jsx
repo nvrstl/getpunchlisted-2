@@ -205,15 +205,19 @@ function ChatInterface({ project, projects, userInitials, onSelectProject }) {
       const label = CATEGORY_LABELS[c.category] || (c.category ? `Categorie: ${c.category}` : 'Documenten');
       (byCategory[label] ||= []).push(c);
     }
-    // Prefer raw_text (verbatim source) over content (AI summary) so the
-    // assistant can quote clauses. Single-project chats get a generous cap;
-    // cross-project chats stay tighter to keep the prompt bounded.
+    // Prefer raw_text (verbatim source) over content (AI summary). Label
+    // each doc so the model knows whether it has full text or only a
+    // summary — without this it hedges with "text extraction not done yet"
+    // when only the summary is available.
     const perDocCap = projectScope ? 6000 : 1500;
     for (const [label, items] of Object.entries(byCategory)) {
       sections.push(
-        `## ${label}\n` + items.map(c =>
-          `[${nameMap[c.project_id]}] ${c.title}${c.source ? ` (${c.source})` : ''}: ${trunc(c.raw_text || c.content, perDocCap)}`
-        ).join('\n')
+        `## ${label}\n` + items.map(c => {
+          const hasRaw = !!(c.raw_text && c.raw_text.length > 50);
+          const kind = hasRaw ? 'VOLLEDIGE TEKST' : 'SAMENVATTING';
+          const body = hasRaw ? c.raw_text : c.content;
+          return `[${nameMap[c.project_id]}] ${c.title}${c.source ? ` (${c.source})` : ''} — ${kind}: ${trunc(body, perDocCap)}`;
+        }).join('\n')
       );
     }
 
@@ -264,6 +268,11 @@ KRITISCHE REGEL — grounding:
 - Verzin niets. Als iets niet in het PROJECTGEHEUGEN staat, antwoord expliciet: "Dat staat niet in het projectgeheugen."
 - Eerder gevoerde gesprekken in deze chat zijn GEEN bron — als de gebruiker in een vorige beurt iets noemde dat nu uit het projectgeheugen verdwenen is, behandel het als afwezig.
 - Maak een duidelijk onderscheid tussen contracten met de opdrachtgever (bouwheer) en contracten met onderaannemers — verschillende partijen, verschillende verplichtingen.
+
+DOCUMENTEN:
+Elke documentregel eindigt op "— VOLLEDIGE TEKST" of "— SAMENVATTING".
+- Bij VOLLEDIGE TEKST mag je letterlijk citeren met aanhalingstekens en bronvermelding.
+- Bij SAMENVATTING werk je gewoon met de samenvatting. Beweer NOOIT dat "de tekst nog niet geëxtraheerd is" of "het document nog verwerkt wordt" — de samenvatting IS de informatie die je hebt. Begin je antwoord met "Volgens de samenvatting van <titel>...".
 
 PROJECTGEHEUGEN (enige bron van waarheid voor dit antwoord):
 ${context}

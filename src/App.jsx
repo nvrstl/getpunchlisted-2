@@ -595,11 +595,20 @@ export default function App() {
   };
 
   // ── Context Items ──────────────────────────────────────────────────────────
+  // Postgres TEXT rejects U+0000 (NUL bytes). PDF extraction occasionally
+  // produces them — strip before insert. Also collapses other control chars
+  // that aren't useful in stored text but trip the JSON encoder.
+  const cleanText = (s) => typeof s === 'string'
+    ? s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    : s;
   const addContextItem = async (item) => {
     const payload = {
-      project_id: project.id, category: item.category, title: item.title,
-      content: item.content, source: item.source || null,
-      raw_text: item.raw_text || null,
+      project_id: project.id,
+      category:   item.category,
+      title:      cleanText(item.title),
+      content:    cleanText(item.content),
+      source:     item.source || null,
+      raw_text:   item.raw_text ? cleanText(item.raw_text) : null,
     };
     let { data, error } = await supabase.from('project_context').insert(payload).select().single();
     // If raw_text column doesn't exist on this Supabase yet (migration not

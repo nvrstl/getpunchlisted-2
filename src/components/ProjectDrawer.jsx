@@ -5,6 +5,50 @@ import {
   Paperclip, FileText, Users, MessageSquare, Upload,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import * as pdfjsLib from 'pdfjs-dist';
+import * as XLSX from 'xlsx';
+
+// Mirror the pdf.js worker setup used in ContextManager so PDF extraction
+// works the same way regardless of which upload UI the user clicks.
+if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+}
+
+async function extractPdfText(file, onProgress) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    pages.push(content.items.map(item => item.str).join(' '));
+    onProgress?.({ done: i, total: pdf.numPages });
+  }
+  const text = pages.join('\n');
+  return { text, pages: pdf.numPages, chars: text.length };
+}
+
+async function extractXlsxText(file, onProgress) {
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  const parts = [];
+  let i = 0;
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+    if (csv.trim()) parts.push(`[Sheet: ${sheetName}]\n${csv}`);
+    onProgress?.({ done: ++i, total: workbook.SheetNames.length });
+  }
+  const text = parts.join('\n\n');
+  return { text, pages: workbook.SheetNames.length, chars: text.length };
+}
+
+const EXTRACTORS = {
+  'application/pdf': extractPdfText,
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': extractXlsxText,
+  'application/vnd.ms-excel': extractXlsxText,
+};
 
 /* ─────────────────────────────────────────────────────────────────────────── */
 /*  Generic right-side drawer                                                  */
@@ -75,24 +119,72 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [source, setSource] = useState('');
+  const [rawText, setRawText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  // Multi-step progress for PDF/Excel upload (mirrors ContextManager's panel).
+  const [uploadPhase, setUploadPhase] = useState(null); // null | 'extracting' | 'processing' | 'done' | 'error'
+  const [uploadStats, setUploadStats] = useState({ fileName: null, pagesDone: 0, pagesTotal: 0, chars: 0, summaryLen: 0 });
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
     setSource(file.name);
     if (!title) setTitle(file.name.replace(/\.[^.]+$/, ''));
+    setError('');
+
+    // Plain-text files: just inline the contents, no AI processing needed.
     if (file.type.startsWith('text/') || /\.(txt|md|csv)$/i.test(file.name)) {
       const text = await file.text();
-      setContent(text.slice(0, 50000));
-    } else {
-      // PDF / docx etc — server-side extraction would go here. For now just keep file name.
-      setContent(`(${file.name} — geüpload, tekst-extractie volgt later)`);
+      const capped = text.slice(0, 50000);
+      setContent(capped);
+      setRawText(capped);
+      return;
     }
-    e.target.value = '';
+
+    // PDF / Excel: extract text → AI summary → auto-fill the form fields,
+    // store the raw text so the chat can quote verbatim.
+    const extractor = EXTRACTORS[file.type];
+    if (!extractor) {
+      setError('Alleen PDF, Excel (.xlsx) en tekstbestanden worden ondersteund.');
+      return;
+    }
+
+    setUploadPhase('extracting');
+    setUploadStats({ fileName: file.name, pagesDone: 0, pagesTotal: 0, chars: 0, summaryLen: 0 });
+    try {
+      const { text, pages, chars } = await extractor(file, ({ done, total }) =>
+        setUploadStats(s => ({ ...s, pagesDone: done, pagesTotal: total }))
+      );
+      if (!text.trim()) throw new Error('Geen tekst gevonden in dit bestand (mogelijk een gescande PDF zonder OCR).');
+      setUploadStats(s => ({ ...s, pages, chars }));
+
+      setUploadPhase('processing');
+      const excerpt = text.length > 40000 ? text.slice(0, 40000) : text;
+      const res = await fetch('/api/process-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: excerpt, filename: file.name }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'AI-verwerking mislukt');
+      const { title: aiTitle, summary, keyPoints, category: aiCategory } = json.data;
+      const composed = [summary, '', ...(keyPoints || []).map(k => `• ${k}`)].join('\n');
+
+      setTitle(aiTitle || file.name.replace(/\.[^.]+$/, ''));
+      setContent(composed);
+      setCategory(aiCategory || 'quote');
+      setRawText(excerpt.length > 80000 ? excerpt.slice(0, 80000) : excerpt);
+      setUploadStats(s => ({ ...s, summaryLen: composed.length }));
+      setUploadPhase('done');
+      setTimeout(() => setUploadPhase(null), 2000);
+    } catch (err) {
+      setError(err.message);
+      setUploadPhase('error');
+    }
   };
 
   const handleAdd = async (e) => {
@@ -103,8 +195,15 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
     }
     setSubmitting(true); setError('');
     try {
-      await onAdd({ category, title: title.trim(), content: content.trim(), source: source.trim() || null });
-      setTitle(''); setContent(''); setSource(''); setAdding(false);
+      await onAdd({
+        category,
+        title: title.trim(),
+        content: content.trim(),
+        source: source.trim() || null,
+        raw_text: rawText || null,
+      });
+      setTitle(''); setContent(''); setSource(''); setRawText(''); setAdding(false);
+      setUploadPhase(null);
     } catch (err) {
       setError(err.message || 'Kon niet toevoegen.');
     } finally {
@@ -174,13 +273,71 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
                  value={source} onChange={e => setSource(e.target.value)}
                  className="w-full px-3 py-2 rounded-md bg-white border border-black/10 text-[13px] outline-none focus:border-[#7669ff]/50" />
           <div className="flex items-center gap-2">
-            <input ref={fileRef} type="file" onChange={handleFile} className="hidden" />
+            <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.txt,.md,.csv" onChange={handleFile} className="hidden" />
             <button type="button" onClick={() => fileRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium border border-black/10 hover:bg-black/[0.04] cursor-pointer text-[#0c0040]">
+                    disabled={uploadPhase === 'extracting' || uploadPhase === 'processing'}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium border border-black/10 hover:bg-black/[0.04] cursor-pointer text-[#0c0040] disabled:opacity-50">
               <Upload className="w-3.5 h-3.5" /> Upload bestand
             </button>
             <span className="text-[11px] text-[var(--text-tertiary)]">of plak hieronder</span>
           </div>
+
+          {/* PDF/Excel processing progress */}
+          {uploadPhase && uploadPhase !== 'error' && (
+            <div className="paper-card-tight px-3 py-2.5 space-y-1.5">
+              {uploadStats.fileName && (
+                <p className="text-[11px] font-mono text-[var(--text-tertiary)] truncate">{uploadStats.fileName}</p>
+              )}
+              {[
+                {
+                  key: 'extracting',
+                  label: uploadStats.pagesTotal > 0 && uploadPhase === 'extracting'
+                    ? `Tekst uit document lezen (${uploadStats.pagesDone}/${uploadStats.pagesTotal})`
+                    : 'Tekst uit document lezen',
+                  hint: uploadStats.chars > 0
+                    ? `${uploadStats.pages} pagina${uploadStats.pages === 1 ? '' : '\'s'} · ${uploadStats.chars.toLocaleString('nl-BE')} karakters`
+                    : null,
+                },
+                {
+                  key: 'processing',
+                  label: 'AI samenvatting genereren',
+                  hint: uploadStats.summaryLen > 0
+                    ? `${uploadStats.summaryLen} karakters samenvatting`
+                    : null,
+                },
+              ].map(step => {
+                const order = ['extracting', 'processing', 'done'];
+                const idx = order.indexOf(uploadPhase);
+                const stepIdx = order.indexOf(step.key);
+                const st = idx > stepIdx ? 'done' : idx === stepIdx ? 'active' : 'pending';
+                return (
+                  <div key={step.key} className="flex items-start gap-2">
+                    <div className={cn(
+                      'w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
+                      st === 'done'    && 'bg-[#d4f7ec]',
+                      st === 'active'  && 'bg-brand/15',
+                      st === 'pending' && 'bg-black/[0.06]',
+                    )}>
+                      {st === 'done'   && <Check className="w-2.5 h-2.5 text-[#0c7a5e]" />}
+                      {st === 'active' && <Loader2 className="w-2.5 h-2.5 text-brand animate-spin" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={cn(
+                        'text-[12px]',
+                        st === 'pending' ? 'text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]',
+                      )}>{step.label}</p>
+                      {step.hint && st !== 'pending' && (
+                        <p className="text-[10.5px] text-[var(--text-tertiary)]">{step.hint}</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {uploadPhase === 'done' && (
+                <p className="text-[11px] text-[#075e48] font-medium pt-1">Klaar — controleer de velden en klik Toevoegen.</p>
+              )}
+            </div>
+          )}
           <textarea placeholder="Inhoud (plak offerte-tekst, lastenboek, of mail body)"
                     value={content} onChange={e => setContent(e.target.value)} rows={8}
                     className="w-full px-3 py-2 rounded-md bg-white border border-black/10 text-[12.5px] outline-none focus:border-[#7669ff]/50 resize-y" />

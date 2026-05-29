@@ -157,6 +157,36 @@ export default async function handler(req, res) {
       }
     }
 
+    // Pull the top keyword-hit chunks separately and put them in a dedicated
+    // 'DIRECTE TREFWOORD-HITS' section at the top of the prompt. The model
+    // sometimes ignores chunks buried inside a per-document body — pulling
+    // them out into a visible, unambiguous block makes it physically
+    // impossible to claim 'the section isn't extracted' when chunks
+    // literally containing the user's keyword are sitting at the top.
+    let directHitsBlock = '';
+    try {
+      const keywords = (message || '').toLowerCase().match(/[\p{L}]{4,}/gu) || [];
+      const stems = [...new Set(keywords.map(w => {
+        const stripped = w.replace(/(ten|den|sen|en|s|n|e)$/, '');
+        return stripped.length >= 4 ? stripped : w;
+      }))].filter(k => !['voor', 'door', 'naar', 'over', 'staan', 'staat', 'waar', 'welke', 'welk', 'kunnen', 'project', 'projectgeheugen'].includes(k));
+      if (stems.length) {
+        const { data: hits } = await supabase.rpc('search_chunks_by_keywords', {
+          p_project_id:  projectId,
+          p_keywords:    stems,
+          p_match_count: 10,
+        });
+        if (hits?.length) {
+          const titleById = new Map(docs.map(d => [d.id, d.title]));
+          directHitsBlock = hits.map(h =>
+            `• Uit "${titleById.get(h.project_context_id) || 'onbekend'}":\n  ${h.text.slice(0, 800).replace(/\s+/g, ' ').trim()}`
+          ).join('\n\n');
+        }
+      }
+    } catch (e) {
+      console.warn('[project-chat] direct keyword hits failed:', e.message);
+    }
+
     const ctxBlock = docs.map(i => {
       const hasRaw = !!(i.raw_text && i.raw_text.length > 50);
       const full   = hasRaw ? i.raw_text : (i.content || '');
@@ -215,7 +245,14 @@ ${project.project_number ? `· Nummer: ${project.project_number}\n` : ''}${proje
 CONTACTEN
 ${contactsBlock}
 
-DOCUMENT-INVENTARIS (alle ${docs.length} documenten in het projectgeheugen — gebruik deze lijst om te bepalen WELKE documenten er zijn, ongeacht welke fragmenten hieronder getoond zijn):
+${directHitsBlock ? `╔═══════════════════════════════════════════════════════════════════╗
+║ DIRECTE TREFWOORD-HITS — letterlijke citaten uit de documenten   ║
+║ die het trefwoord uit de vraag bevatten. NOOIT zeggen dat deze   ║
+║ niet beschikbaar zijn — ze staan letterlijk hieronder.           ║
+╚═══════════════════════════════════════════════════════════════════╝
+${directHitsBlock}
+
+` : ''}DOCUMENT-INVENTARIS (alle ${docs.length} documenten in het projectgeheugen — gebruik deze lijst om te bepalen WELKE documenten er zijn, ongeacht welke fragmenten hieronder getoond zijn):
 ${docs.length
   ? docs.map(d => `· ${d.title} [${d.category || 'document'}] — ${d.raw_text ? `${(d.raw_text.length / 1000).toFixed(0)}k karakters` : `samenvatting (${(d.content || '').length} karakters)`}${d.source ? ` · bron: ${d.source}` : ''}`).join('\n')
   : '(nog geen documenten geüpload)'}

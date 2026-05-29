@@ -255,7 +255,20 @@ ${logsBlock || '(nog geen inbox-items)'}
 Houd je antwoorden kort. Verwijs naar specifieke memo's of documenten als bewijs.
 
 CITATIES — VERPLICHT:
-Wanneer je een specifiek inbox-item noemt (memo, e-mail, voicenote, WhatsApp), voeg dan ONMIDDELLIJK na de zin de marker [memo:<id>] toe, met het id uit de [id:...] prefix van dat item hierboven. Voorbeeld: "Op 14 mei meldde de bouwheer een vertraging.[memo:2d88d345-1de6-466e-88cd-51ef9257b81a]". Gebruik enkel echte id's die in het PROJECTGEHEUGEN voorkomen — verzin niets. Geen markdown headers, gebruik korte alinea's.`;
+Wanneer je een specifiek inbox-item noemt (memo, e-mail, voicenote, WhatsApp), voeg dan ONMIDDELLIJK na de zin de marker [memo:<id>] toe, met het id uit de [id:...] prefix van dat item hierboven. Voorbeeld: "Op 14 mei meldde de bouwheer een vertraging.[memo:2d88d345-1de6-466e-88cd-51ef9257b81a]". Gebruik enkel echte id's die in het PROJECTGEHEUGEN voorkomen — verzin niets. Geen markdown headers, gebruik korte alinea's.
+
+═══════════════════════════════════════════════════════════════════
+LAATSTE INSTRUCTIE — LEES VOOR JE ANTWOORDT:
+
+Alle ${docs.length} documenten in DOCUMENT-INVENTARIS zijn 100% volledig in het projectgeheugen opgeslagen. Het systeem heeft per document een SELECTIE van semantisch en op-trefwoord relevante fragmenten opgehaald voor déze specifieke vraag. De rest van elk document is niet "weg" of "ontbrekend" of "niet geëxtraheerd" — het was gewoon minder relevant voor deze ene vraag.
+
+Als je het exacte antwoord niet in de getoonde fragmenten ziet:
+✓ DOE: "Ik vond geen fragmenten over <onderwerp>. Probeer een specifieker trefwoord (artikelnummer / merknaam / synoniem) zodat de juiste passages opgehaald worden."
+✓ DOE: Citeer wel wat je WEL ziet over verwante onderwerpen.
+✗ DOE NIET: claim dat een document of deel "niet geëxtraheerd", "niet beschikbaar", "niet volledig", "alleen het deel X" of "ontbreekt" is.
+
+Die laatste zin is hard verboden — als je twijfelt, herlees DOCUMENT-INVENTARIS en bevestig: alle documenten zijn er, je hebt enkel een selectie van hun fragmenten.
+═══════════════════════════════════════════════════════════════════`;
 
     const messages = [
       ...history.filter(m => m && m.role && m.content).map(m => ({
@@ -265,9 +278,15 @@ Wanneer je een specifiek inbox-item noemt (memo, e-mail, voicenote, WhatsApp), v
       { role: 'user', content: message },
     ];
 
+    // Sonnet for project chat. Haiku kept producing partial-extraction
+    // hedges ("alleen het deel X is geëxtraheerd") even with explicit
+    // forbidden-phrasing instructions in the system prompt. Sonnet follows
+    // nuanced rules much better and reasons properly about "I have a
+    // selection of fragments" vs "the document is incomplete". ~4× the
+    // input cost but for a project chat this is well worth it.
     const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 800,
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1200,
       system: systemPrompt,
       messages,
     });

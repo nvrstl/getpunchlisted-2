@@ -20,25 +20,42 @@ export default async function handler(req, res) {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const { data: { users } } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-    const existingUser = (users || []).find(u => u.email?.toLowerCase() === normalizedEmail);
+    // Fast lookup via SQL — listUsers pagination caps at 1000 and would
+    // silently miss anyone past that. The RPC hits auth.users directly
+    // with service-role privileges and returns NULL if no match.
+    const { data: existingId } = await supabaseAdmin.rpc('auth_user_id_by_email', {
+      p_email: normalizedEmail,
+    });
 
-    let resolvedUserId = existingUser?.id || null;
-
-    // New user: invite via Supabase — creates auth account + sends invite email
+    let resolvedUserId = existingId || null;
     let inviteError = null;
-    if (!existingUser) {
+    if (!resolvedUserId) {
+      // New user: invite via Supabase — creates auth account + sends invite email
       const { data: inviteData, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(normalizedEmail);
       if (inviteData?.user?.id) resolvedUserId = inviteData.user.id;
       else if (inviteErr) inviteError = inviteErr.message;
     }
 
+    if (!resolvedUserId) {
+      // Hard fail rather than silently insert a NULL user_id row that RLS
+      // will then refuse to see. The caller surfaces this in the UI so the
+      // admin knows to retry / check Supabase auth state.
+      return res.status(500).json({
+        success: false,
+        error: `Kon geen auth-account vinden of aanmaken voor ${normalizedEmail}. ${inviteError ? `(${inviteError})` : ''}`,
+      });
+    }
+
+    // accepted_at stamped now if the user already had an auth account before
+    // we got here (no email confirmation needed); left NULL for fresh invites
+    // so the backoffice badge can show 'Uitnodiging verstuurd' until they
+    // sign in and sync-memberships flips it.
     const { data, error } = await supabaseAdmin.from('company_users').insert({
       company_id: id,
       user_id: resolvedUserId,
       email: normalizedEmail,
       role,
-      accepted_at: existingUser ? new Date().toISOString() : null,
+      accepted_at: existingId ? new Date().toISOString() : null,
     }).select().single();
 
     if (error) {

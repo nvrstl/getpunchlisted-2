@@ -29,15 +29,18 @@ export default async function handler(req, res) {
     .select('id');
   if (pmErr) return res.status(500).json({ success: false, error: pmErr.message });
 
-  // 2) company_users: link + accept any matching row that hasn't been
-  //    accepted yet. Matches by email so it covers both the
-  //    "user_id was NULL" case and the "user_id set at invite time but
-  //    accepted_at never stamped" case.
+  // 2) company_users: backfill user_id + accepted_at for any matching row
+  //    that's missing either. Two cases we need to catch:
+  //      (a) user_id IS NULL — invite was created without an auth id (or
+  //          the SQL link was added manually before the user registered).
+  //      (b) accepted_at IS NULL — invite was created, auth id present,
+  //          but they hadn't logged in yet.
+  //    Previously this only matched (b), so case (a) needed manual SQL.
   const { data: cuRows, error: cuErr } = await supabaseAdmin
     .from('company_users')
     .update({ user_id: userId, accepted_at: new Date().toISOString() })
     .eq('email', email)
-    .is('accepted_at', null)
+    .or('user_id.is.null,accepted_at.is.null')
     .select('id');
   if (cuErr) console.warn('[sync-memberships] company_users backfill:', cuErr.message);
 

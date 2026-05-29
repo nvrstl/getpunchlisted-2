@@ -634,7 +634,11 @@ export default function App() {
     if (chunks.length === 0) {
       return { ...mapContext(data), chunkCount: 0 };
     }
-    const BATCH_SIZE = 50;
+    // 20 chunks per batch keeps each Supabase insert comfortably under the
+    // service_role statement_timeout (~30s). HNSW index updates get more
+    // expensive as the table grows; smaller batches make late-batch
+    // 'canceling statement due to statement timeout' impossible to hit.
+    const BATCH_SIZE = 20;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return { ...mapContext(data), chunkCount: 0, embedError: 'no session' };

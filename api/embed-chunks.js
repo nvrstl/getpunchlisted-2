@@ -70,6 +70,9 @@ export default async function handler(req, res) {
       if (/relation .* context_chunks .* does not exist/i.test(insErr.message)) {
         throw new Error('context_chunks table not found — apply supabase/add_context_chunks.sql migration first');
       }
+      if (/statement timeout/i.test(insErr.message)) {
+        throw new Error('DB statement timeout — apply supabase/add_embedding_timeout.sql to raise service_role statement_timeout to 120s');
+      }
       throw new Error(insErr.message);
     }
     return res.json({ success: true, inserted: rows.length });

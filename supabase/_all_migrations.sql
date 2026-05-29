@@ -1,6 +1,6 @@
 -- ============================================================
 -- Punchlister — consolidated migrations
--- Generated: 2026-05-28 15:39:59 UTC
+-- Generated: 2026-05-29 08:49:48 UTC
 -- Paste into Supabase SQL editor on a FRESH project.
 -- ============================================================
 
@@ -1136,6 +1136,23 @@ alter table field_logs add column if not exists dispute_types text[] default '{}
 alter table dispute_points
   add column if not exists draft_response        text,
   add column if not exists draft_generated_at    timestamptz;
+
+
+-- ────────── supabase/add_embedding_timeout.sql ──────────
+-- ── Bump statement_timeout for embedding inserts ─────────────────────────────
+-- Service-role default is 30s on Supabase. HNSW index updates while bulk
+-- inserting hundreds of context_chunks rows (one per ~1200-char document
+-- chunk) can exceed that on a hot table. Raise to 120s so large documents
+-- (5k+ chunks) still embed without 'canceling statement due to statement
+-- timeout' errors.
+--
+-- Safe to re-run.
+
+alter role service_role set statement_timeout = '120s';
+
+-- The change applies to NEW connections via PgBouncer/pooler. Force a
+-- pool reset to ensure existing pooled connections pick it up.
+select pg_reload_conf();
 
 
 -- ────────── supabase/add_field_log_email_support.sql ──────────

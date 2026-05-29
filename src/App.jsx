@@ -625,7 +625,11 @@ export default function App() {
     // batch fits in a single OpenAI request (max 64) and a 30s Vercel
     // function — so a 1 MB / 830-chunk PDF that previously blew the
     // single-request timeout now completes in ~17 short calls.
-    const rawForChunks = item.raw_text || item.content || '';
+    // IMPORTANT: chunk from the CLEANED text (NUL/control bytes stripped),
+    // matching what's stored in project_context.raw_text. Otherwise chunks
+    // carry NUL bytes through to context_chunks and Postgres rejects them
+    // with "unsupported Unicode escape sequence" on a later batch.
+    const rawForChunks = cleanText(item.raw_text || item.content || '');
     const chunks = chunkText(rawForChunks);
     if (chunks.length === 0) {
       return { ...mapContext(data), chunkCount: 0 };

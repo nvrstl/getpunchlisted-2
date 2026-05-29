@@ -47,9 +47,17 @@ export default async function handler(req, res) {
       if (delErr) console.warn('[embed-chunks] delete old chunks:', delErr.message);
     }
 
-    const texts = chunks.map(c => c.text);
+    // Defence in depth: strip NUL + other invalid control bytes (Postgres
+    // TEXT rejects U+0000 with "unsupported Unicode escape sequence" and
+    // the JSON wire chokes on a handful of others). The client already
+    // does this, but a stray byte from any other code path would tank
+    // an entire embedding batch otherwise.
+    const sanitize = (s) => (s || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+    const cleaned = chunks.map(c => ({ ...c, text: sanitize(c.text) }));
+
+    const texts = cleaned.map(c => c.text);
     const embeddings = await embedTexts(texts);
-    const rows = chunks.map((c, i) => ({
+    const rows = cleaned.map((c, i) => ({
       project_context_id: contextId,
       project_id:         projectId,
       chunk_idx:          c.idx,

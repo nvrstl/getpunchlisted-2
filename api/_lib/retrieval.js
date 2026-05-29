@@ -1,9 +1,35 @@
-// Vector retrieval over context_chunks. Embeds the user's question once,
-// then runs a cosine-similarity search per project. Returns the top-K
-// matching chunks grouped by their parent project_context row so the chat
-// prompt can show them under the correct document header.
+// Vector + keyword retrieval over context_chunks. Embeds the user's
+// question and runs a cosine-similarity search, plus a parallel
+// substring-match search for the question's noun-like keywords. Returns
+// the union (deduped) so chunks that mention a specific term but don't
+// score well semantically (brand names, artikelnummers, code numbers)
+// still surface.
 
 import { embedOne } from './embeddings.js';
+
+const STOPWORDS = new Set([
+  'de','het','een','en','of','van','op','in','aan','dat','is','niet','met','voor',
+  'door','te','om','wat','wie','waar','hoe','wanneer','welke','welk','dan','maar',
+  'als','ook','er','zijn','was','wordt','worden','heeft','hebben','had','kan','kunnen',
+  'moet','moeten','mag','mogen','wil','willen','zou','zouden','staat','staan',
+  'the','a','an','and','or','of','on','in','at','to','for','from','by','with','that',
+  'is','are','was','were','be','been','being','has','have','had','do','does','did',
+  'will','would','should','could','may','might','can','this','these','those','it',
+]);
+
+// Extract noun-like keywords from the question for substring search.
+// Stems Dutch plural endings so "stopcontacten" → "stopcontact" matches
+// the singular form too.
+function extractKeywords(question) {
+  const words = (question || '').toLowerCase().match(/[\p{L}]{4,}/gu) || [];
+  const stems = words
+    .filter(w => !STOPWORDS.has(w))
+    .map(w => {
+      const stripped = w.replace(/(ten|den|sen|en|s|n|e)$/, '');
+      return stripped.length >= 4 ? stripped : w;
+    });
+  return [...new Set(stems)];
+}
 
 export async function retrieveRelevantChunks(supabase, { projectId, question, matchCount = 20 }) {
   if (!projectId || !question?.trim()) return [];
@@ -24,16 +50,45 @@ export async function retrieveRelevantChunks(supabase, { projectId, question, ma
   const POOL = Math.max(matchCount * 3, 100);
   const MIN_PER_DOC = 5;
 
-  const { data, error } = await supabase.rpc('match_context_chunks', {
-    p_project_id:  projectId,
-    p_embedding:   queryEmbedding,
-    p_match_count: POOL,
-  });
-  if (error) {
-    console.warn('[retrieval] match_context_chunks rpc failed:', error.message);
+  // Run vector search + keyword substring search in parallel. Keyword
+  // search catches chunks that mention a specific term (brand name,
+  // article number, exact concept) but might score low semantically.
+  const keywords = extractKeywords(question);
+  const [vecRes, kwRes] = await Promise.all([
+    supabase.rpc('match_context_chunks', {
+      p_project_id:  projectId,
+      p_embedding:   queryEmbedding,
+      p_match_count: POOL,
+    }),
+    keywords.length
+      ? supabase.rpc('search_chunks_by_keywords', {
+          p_project_id:  projectId,
+          p_keywords:    keywords,
+          p_match_count: 40,
+        }).then(r => ({ ...r, error: /function .* does not exist/i.test(r.error?.message || '') ? null : r.error, data: r.data || [] }))
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (vecRes.error) {
+    console.warn('[retrieval] match_context_chunks rpc failed:', vecRes.error.message);
     return null;
   }
-  const all = data || [];
+  if (kwRes.error) {
+    console.warn('[retrieval] search_chunks_by_keywords rpc failed:', kwRes.error.message);
+  }
+
+  // Merge: keep highest similarity per chunk_id, prefer the larger value.
+  const byId = new Map();
+  for (const ch of vecRes.data || []) {
+    byId.set(ch.chunk_id, ch);
+  }
+  for (const ch of kwRes.data || []) {
+    const existing = byId.get(ch.chunk_id);
+    if (!existing || (ch.similarity || 0) > (existing.similarity || 0)) {
+      byId.set(ch.chunk_id, ch);
+    }
+  }
+  const all = [...byId.values()].sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
   if (all.length <= matchCount) return all;
 
   // Group by parent context, sort each group by similarity desc.

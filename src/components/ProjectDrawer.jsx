@@ -5,6 +5,7 @@ import {
   Paperclip, FileText, Users, MessageSquare, Upload,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { supabase } from '../lib/supabase';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 
@@ -624,6 +625,155 @@ export function ContextPanel({ project, contextItems = [], onAdd, onDelete, forw
           </p>
         )}
       </div>
+
+      {/* Chunk inspector — see what's actually in the vector store */}
+      <ChunkInspector projectId={project?.id} />
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+/*  CHUNK INSPECTOR — visualise what's in the vector store                     */
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+function ChunkInspector({ projectId }) {
+  const [open, setOpen]             = useState(false);
+  const [loaded, setLoaded]         = useState(false);
+  const [loading, setLoading]       = useState(false);
+  const [docs, setDocs]             = useState([]);
+  const [expandedDoc, setExpanded]  = useState(null);  // doc id
+  const [expandedChunk, setExpandedChunk] = useState(null); // chunk id
+  const [neighbours, setNeighbours] = useState({});    // chunk id → array
+  const [error, setError]           = useState('');
+
+  const load = async () => {
+    if (!projectId) return;
+    setLoading(true); setError('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Niet ingelogd');
+      const res = await fetch(`/api/inspect-chunks?projectId=${projectId}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Inspectie mislukt');
+      setDocs(json.docs || []);
+      setLoaded(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    setOpen(o => {
+      const next = !o;
+      if (next && !loaded) load();
+      return next;
+    });
+  };
+
+  const loadNeighbours = async (chunkId) => {
+    if (neighbours[chunkId]) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/inspect-chunks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ chunkId }),
+      });
+      const json = await res.json();
+      if (json.success) setNeighbours(prev => ({ ...prev, [chunkId]: json.neighbours || [] }));
+    } catch (e) { console.warn(e.message); }
+  };
+
+  const totalChunks  = docs.reduce((s, d) => s + d.chunkCount, 0);
+  const embeddedDocs = docs.filter(d => d.chunkCount > 0).length;
+
+  return (
+    <div className="mt-4 pt-4 border-t border-black/5">
+      <button onClick={toggle}
+              className="w-full inline-flex items-center justify-between px-3 py-2 rounded-lg text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-black/[0.04] cursor-pointer">
+        <span className="inline-flex items-center gap-2">
+          <FileText className="w-3.5 h-3.5" />
+          Fragmenten-inzicht
+          {loaded && ` (${embeddedDocs}/${docs.length} docs · ${totalChunks} fragmenten)`}
+        </span>
+        <span className="text-[var(--text-tertiary)]">{open ? '−' : '+'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-2 space-y-2">
+          {loading && <p className="text-[12px] text-[var(--text-tertiary)] px-3 py-2">Laden…</p>}
+          {error   && <p className="text-[12px] text-[#9b1d1d] px-3 py-2">{error}</p>}
+
+          {loaded && docs.length === 0 && (
+            <p className="text-[12px] text-[var(--text-tertiary)] px-3 py-2">Nog geen documenten in dit project.</p>
+          )}
+
+          {docs.map(d => (
+            <div key={d.id} className="paper-card-tight">
+              <button onClick={() => setExpanded(expandedDoc === d.id ? null : d.id)}
+                      className="w-full px-3 py-2 flex items-start justify-between gap-2 cursor-pointer hover:bg-black/[0.02]">
+                <div className="flex-1 min-w-0 text-left">
+                  <p className="text-[12px] font-medium text-[var(--text-primary)] truncate">{d.title}</p>
+                  <p className="text-[10.5px] text-[var(--text-tertiary)] mt-0.5">
+                    {d.category || 'document'} ·
+                    {' '}{d.rawChars ? `${(d.rawChars/1000).toFixed(0)}k karakters` : 'samenvatting'}
+                    {' · '}
+                    <span className={d.chunkCount > 0 ? 'text-[#075e48] font-medium' : 'text-amber-700'}>
+                      {d.chunkCount > 0 ? `${d.chunkCount} fragmenten doorzoekbaar` : 'nog niet doorzoekbaar'}
+                    </span>
+                  </p>
+                </div>
+                <span className="text-[var(--text-tertiary)] text-[12px] flex-shrink-0">
+                  {expandedDoc === d.id ? '−' : '+'}
+                </span>
+              </button>
+
+              {expandedDoc === d.id && d.chunks.length > 0 && (
+                <div className="px-3 pb-3 space-y-1.5 border-t border-black/5">
+                  {d.chunks.slice(0, 50).map(ch => (
+                    <div key={ch.id} className="text-left">
+                      <button onClick={() => {
+                                setExpandedChunk(expandedChunk === ch.id ? null : ch.id);
+                                if (expandedChunk !== ch.id) loadNeighbours(ch.id);
+                              }}
+                              className="w-full px-2 py-1.5 rounded text-left text-[11px] text-[var(--text-secondary)] hover:bg-black/[0.04] cursor-pointer">
+                        <span className="font-mono text-[10px] text-[var(--text-tertiary)] mr-1">#{ch.idx}</span>
+                        {ch.preview}…
+                      </button>
+                      {expandedChunk === ch.id && (
+                        <div className="ml-3 pl-3 border-l-2 border-[#7669ff]/30 mt-1 mb-2 space-y-1">
+                          <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
+                            Semantisch verwant
+                          </p>
+                          {!neighbours[ch.id] && <p className="text-[10.5px] text-[var(--text-tertiary)]">Laden…</p>}
+                          {neighbours[ch.id]?.length === 0 && <p className="text-[10.5px] text-[var(--text-tertiary)]">Geen verwante fragmenten.</p>}
+                          {neighbours[ch.id]?.map(n => (
+                            <div key={n.chunkId} className="text-[10.5px] text-[var(--text-secondary)]">
+                              <span className="text-[var(--text-tertiary)] font-mono mr-1">
+                                {(n.similarity * 100).toFixed(0)}%
+                              </span>
+                              <span className="font-medium">{n.contextTitle}</span>: {n.preview}…
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {d.chunks.length > 50 && (
+                    <p className="text-[10.5px] text-[var(--text-tertiary)] px-2 pt-1">
+                      … {d.chunks.length - 50} meer fragmenten (alleen eerste 50 getoond)
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -641,6 +791,67 @@ export function ContactsPanel({ contacts = [], onAdd, onUpdate, onDelete }) {
   const [form, setForm] = useState(blank);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Bulk paste-and-extract state — pasted text → AI extracts contacts →
+  // review table → save selected rows.
+  const [pasteOpen, setPasteOpen]       = useState(false);
+  const [pasteText, setPasteText]       = useState('');
+  const [extracting, setExtracting]     = useState(false);
+  const [extractedRows, setExtractedRows] = useState(null); // null = not yet extracted, [] = none found
+  const [extractError, setExtractError] = useState('');
+  const [savingBulk, setSavingBulk]     = useState(false);
+
+  const runExtract = async () => {
+    if (!pasteText.trim()) { setExtractError('Plak eerst tekst.'); return; }
+    setExtracting(true); setExtractError(''); setExtractedRows(null);
+    try {
+      const res = await fetch('/api/extract-contacts', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text: pasteText }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'AI-extractie mislukt');
+      const withSelection = (json.contacts || []).map((c, i) => ({
+        ...c, _key: `r${i}`, _selected: true,
+      }));
+      setExtractedRows(withSelection);
+    } catch (err) {
+      setExtractError(err.message);
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const updateRow = (key, patch) =>
+    setExtractedRows(rows => rows.map(r => r._key === key ? { ...r, ...patch } : r));
+  const toggleRow = (key) =>
+    setExtractedRows(rows => rows.map(r => r._key === key ? { ...r, _selected: !r._selected } : r));
+
+  const saveBulk = async () => {
+    const toSave = (extractedRows || []).filter(r => r._selected && r.name?.trim());
+    if (!toSave.length) { setExtractError('Geen contacten geselecteerd.'); return; }
+    setSavingBulk(true); setExtractError('');
+    try {
+      for (const r of toSave) {
+        const notes = r.company ? `Bedrijf: ${r.company}` : '';
+        await onAdd({
+          name:  r.name.trim(),
+          role:  r.role || 'Andere',
+          email: r.email || '',
+          phone: r.phone || '',
+          notes,
+        });
+      }
+      setPasteOpen(false);
+      setPasteText('');
+      setExtractedRows(null);
+    } catch (err) {
+      setExtractError(`Opslaan mislukt: ${err.message}`);
+    } finally {
+      setSavingBulk(false);
+    }
+  };
 
   const startEdit = (c) => {
     setForm({ name: c.name || '', role: c.role || 'Andere', email: c.email || '', phone: c.phone || '', notes: c.notes || '' });
@@ -670,12 +881,110 @@ export function ContactsPanel({ contacts = [], onAdd, onUpdate, onDelete }) {
 
   return (
     <div className="p-5 space-y-4">
-      {!adding && !editId && (
-        <button onClick={startAdd}
-                className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[13px] font-medium cursor-pointer"
-                style={{ background: '#280063', color: '#fff' }}>
-          <Plus className="w-4 h-4" /> Contact toevoegen
-        </button>
+      {/* Bulk paste-extract */}
+      {!adding && !editId && !pasteOpen && (
+        <div className="space-y-2">
+          <button onClick={startAdd}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[13px] font-medium cursor-pointer"
+                  style={{ background: '#280063', color: '#fff' }}>
+            <Plus className="w-4 h-4" /> Contact toevoegen
+          </button>
+          <button onClick={() => { setPasteOpen(true); setExtractError(''); setExtractedRows(null); }}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium cursor-pointer text-[var(--text-secondary)] hover:bg-black/[0.04]">
+            <FileText className="w-3.5 h-3.5" /> Of: plak tekst → AI extraheert contacten
+          </button>
+        </div>
+      )}
+
+      {pasteOpen && !extractedRows && (
+        <div className="paper-card p-4 space-y-3">
+          <p className="text-[12px] text-[var(--text-secondary)]">
+            Plak hieronder een e-mailhandtekening, lijst, of vrije tekst. AI haalt naam, e-mail, telefoon en rol eruit.
+          </p>
+          <textarea
+            value={pasteText}
+            onChange={e => setPasteText(e.target.value)}
+            rows={8}
+            autoFocus
+            placeholder="bv.&#10;Jan Janssens — Architect&#10;jan@architect.be&#10;+32 470 12 34 56&#10;Bureau Janssens BVBA"
+            className="w-full px-3 py-2 rounded-md bg-white border border-black/10 text-[12.5px] outline-none focus:border-[#7669ff]/50 resize-y"
+          />
+          {extractError && <p className="text-[12px] text-[#9b1d1d]">{extractError}</p>}
+          <div className="flex items-center gap-2">
+            <button onClick={runExtract} disabled={extracting || !pasteText.trim()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium cursor-pointer disabled:opacity-50"
+                    style={{ background: '#280063', color: '#fff' }}>
+              {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              {extracting ? 'Extraheren…' : 'Extraheer contacten'}
+            </button>
+            <button onClick={() => { setPasteOpen(false); setPasteText(''); setExtractError(''); }}
+                    className="px-4 py-2 rounded-lg text-[13px] font-medium border border-black/10 hover:bg-black/[0.04] cursor-pointer text-[#0c0040]">
+              Annuleren
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pasteOpen && extractedRows && (
+        <div className="paper-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+              {extractedRows.length === 0 ? 'Geen contacten gevonden' : `${extractedRows.filter(r => r._selected).length} van ${extractedRows.length} geselecteerd`}
+            </p>
+            <button onClick={() => setExtractedRows(null)}
+                    className="text-[11px] text-[var(--text-tertiary)] hover:text-[#0c0040] cursor-pointer">
+              Opnieuw
+            </button>
+          </div>
+          {extractedRows.length === 0 ? (
+            <p className="text-[12px] text-[var(--text-tertiary)]">AI vond geen herkenbare contacten in deze tekst.</p>
+          ) : (
+            <div className="space-y-2">
+              {extractedRows.map(r => (
+                <div key={r._key} className="px-3 py-2 rounded-lg bg-white border border-black/10 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" checked={r._selected} onChange={() => toggleRow(r._key)}
+                           className="cursor-pointer accent-[#7669ff]" />
+                    <input type="text" value={r.name || ''}
+                           onChange={e => updateRow(r._key, { name: e.target.value })}
+                           placeholder="Naam"
+                           className="flex-1 px-2 py-1 rounded-md bg-[var(--surface-2)] border border-transparent text-[12.5px] font-medium outline-none focus:border-[#7669ff]/50" />
+                  </div>
+                  <div className="flex items-center gap-1.5 ml-6 flex-wrap">
+                    <select value={r.role || 'Andere'} onChange={e => updateRow(r._key, { role: e.target.value })}
+                            className="px-1.5 py-0.5 rounded text-[10.5px] bg-[var(--surface-2)] border border-transparent outline-none cursor-pointer">
+                      {CONTACT_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+                    </select>
+                    <input type="email" value={r.email || ''}
+                           onChange={e => updateRow(r._key, { email: e.target.value })}
+                           placeholder="e-mail"
+                           className="flex-1 min-w-[120px] px-2 py-0.5 rounded text-[11px] bg-[var(--surface-2)] border border-transparent outline-none focus:border-[#7669ff]/50" />
+                    <input type="tel" value={r.phone || ''}
+                           onChange={e => updateRow(r._key, { phone: e.target.value })}
+                           placeholder="tel"
+                           className="w-28 px-2 py-0.5 rounded text-[11px] bg-[var(--surface-2)] border border-transparent outline-none focus:border-[#7669ff]/50" />
+                  </div>
+                  {r.company && (
+                    <p className="ml-6 text-[10.5px] text-[var(--text-tertiary)]">@ {r.company}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {extractError && <p className="text-[12px] text-[#9b1d1d]">{extractError}</p>}
+          <div className="flex items-center gap-2 pt-1">
+            <button onClick={saveBulk} disabled={savingBulk || !extractedRows.some(r => r._selected && r.name?.trim())}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium cursor-pointer disabled:opacity-50"
+                    style={{ background: '#280063', color: '#fff' }}>
+              {savingBulk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              {savingBulk ? 'Opslaan…' : `Opslaan (${extractedRows.filter(r => r._selected).length})`}
+            </button>
+            <button onClick={() => { setPasteOpen(false); setPasteText(''); setExtractedRows(null); setExtractError(''); }}
+                    className="px-4 py-2 rounded-lg text-[13px] font-medium border border-black/10 hover:bg-black/[0.04] cursor-pointer text-[#0c0040]">
+              Annuleren
+            </button>
+          </div>
+        </div>
       )}
 
       {(adding || editId) && (
